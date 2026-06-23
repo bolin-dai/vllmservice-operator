@@ -4,6 +4,10 @@ ARG TARGETOS
 ARG TARGETARCH
 
 WORKDIR /workspace
+
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GOSUMDB=sum.golang.google.cn
+
 # Copy the Go Modules manifests
 COPY go.mod go.mod
 COPY go.sum go.sum
@@ -27,6 +31,9 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o ma
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
+# 配置 Go 国内代理，避免 docker build 阶段访问 proxy.golang.org 超时
+
+
 COPY --from=builder /workspace/manager .
 USER 65532:65532
 

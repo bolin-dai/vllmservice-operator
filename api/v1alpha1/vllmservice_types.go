@@ -17,22 +17,73 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+type VLLMServiceStorageSpec struct {
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	PVCName string `json:"pvcName"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	MountPath string `json:"mountPath"`
+
+	// +optional
+	// +kubebuilder:default:=true
+	ReadOnly bool `json:"readOnly,omitempty"`
+
+	// +optional
+	SubPath string `json:"subPath,omitempty"`
+}
 
 // VLLMServiceSpec defines the desired state of VLLMService
 type VLLMServiceSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 
-	// foo is an example field of VLLMService. Edit vllmservice_types.go to remove/update
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Image string `json:"image"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	ModelPath string `json:"modelPath"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	ModelName string `json:"modelName"`
+
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	// +kubebuilder:default:=1
+	// +kubebuilder:validation:Minimum=1
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// +optional
+	RuntimeClassName string `json:"runtimeClassName,omitempty"`
+
+	// +optional
+	SchedulerName string `json:"schedulerName,omitempty"`
+
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// +optional
+	// +kubebuilder:default:=8000
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Port int32 `json:"port,omitempty"`
+
+	// +kubebuilder:validation:Required
+	Resources corev1.ResourceRequirements `json:"resources"`
+
+	// +kubebuilder:validation:Required
+	Storage VLLMServiceStorageSpec `json:"storage"`
 }
 
 // VLLMServiceStatus defines the observed state of VLLMService.
@@ -51,11 +102,18 @@ type VLLMServiceStatus struct {
 	// - "Progressing": the resource is being created or updated
 	// - "Degraded": the resource failed to reach or maintain its desired state
 	//
-	// The status of each condition is one of True, False, or Unknown.
-	// +listType=map
-	// +listMapKey=type
+
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	Phase string `json:"phase,omitempty"`
+
+	// +optional
+	ReadyReplicas int32 `json:"readyReplicas,omitempty"`
+
+	// +optional
+	DeploymentName string `json:"deploymentName,omitempty"`
+
+	// +optional
+	Message string `json:"message,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -67,7 +125,7 @@ type VLLMService struct {
 
 	// metadata is a standard object metadata
 	// +optional
-	metav1.ObjectMeta `json:"metadata,omitempty,omitzero"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	// spec defines the desired state of VLLMService
 	// +required
@@ -75,7 +133,7 @@ type VLLMService struct {
 
 	// status defines the observed state of VLLMService
 	// +optional
-	Status VLLMServiceStatus `json:"status,omitempty,omitzero"`
+	Status VLLMServiceStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
