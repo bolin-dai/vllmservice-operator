@@ -199,6 +199,8 @@ func buildModelVolumesAndMounts(vllmservice *aiinfrav1alpha1.VLLMService) ([]cor
 		mountPath = "/data/models"
 	}
 
+	readOnly := readOnlyFor(storage)
+
 	volumeName := "model-storage"
 
 	volumes := []corev1.Volume{
@@ -207,7 +209,7 @@ func buildModelVolumesAndMounts(vllmservice *aiinfrav1alpha1.VLLMService) ([]cor
 			VolumeSource: corev1.VolumeSource{
 				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 					ClaimName: storage.PVCName,
-					ReadOnly:  storage.ReadOnly,
+					ReadOnly:  readOnly,
 				},
 			},
 		},
@@ -216,7 +218,7 @@ func buildModelVolumesAndMounts(vllmservice *aiinfrav1alpha1.VLLMService) ([]cor
 	volumeMount := corev1.VolumeMount{
 		Name:      volumeName,
 		MountPath: mountPath,
-		ReadOnly:  storage.ReadOnly,
+		ReadOnly:  readOnly,
 	}
 
 	if storage.SubPath != "" {
@@ -335,6 +337,14 @@ func int64Ptr(v int64) *int64 {
 
 func boolPtr(v bool) *bool {
 	return &v
+}
+
+func readOnlyFor(storage aiinfrav1alpha1.VLLMServiceStorageSpec) bool {
+	if storage.ReadOnly == nil {
+		return true
+	}
+
+	return *storage.ReadOnly
 }
 
 // SetupWithManager sets up the controller with the Manager.

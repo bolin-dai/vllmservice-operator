@@ -35,7 +35,7 @@ type VLLMServiceStorageSpec struct {
 
 	// +optional
 	// +kubebuilder:default:=true
-	ReadOnly bool `json:"readOnly,omitempty"`
+	ReadOnly *bool `json:"readOnly,omitempty"`
 
 	// +optional
 	SubPath string `json:"subPath,omitempty"`
