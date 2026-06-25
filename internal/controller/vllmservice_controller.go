@@ -350,6 +350,9 @@ func portFor(vllmservice *aiinfrav1alpha1.VLLMService) int32 {
 	return vllmservice.Spec.Port
 }
 
+/*
+selectorLabelsForVLLMService 生成稳定选择标签，用于 Deployment selector 和 Service selector。
+*/
 func selectorLabelsForVLLMService(name string) map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":     "vllmservice",
@@ -357,6 +360,9 @@ func selectorLabelsForVLLMService(name string) map[string]string {
 	}
 }
 
+/*
+labelsForVLLMService 生成完整对象标签，用于 deployment的metadata.labels 和 PodTemplate labels。以及service的metadata.labels
+*/
 func labelsForVLLMService(vllmService *aiinfrav1alpha1.VLLMService) map[string]string {
 
 	labels := make(map[string]string)
