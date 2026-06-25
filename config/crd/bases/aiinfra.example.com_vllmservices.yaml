@@ -169,6 +169,8 @@ spec:
               readyReplicas:
                 format: int32
                 type: integer
+              serviceName:
+                type: string
             type: object
         required:
         - spec

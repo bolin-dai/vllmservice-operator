@@ -113,6 +113,9 @@ type VLLMServiceStatus struct {
 	DeploymentName string `json:"deploymentName,omitempty"`
 
 	// +optional
+	ServiceName string `json:"serviceName,omitempty"`
+
+	// +optional
 	Message string `json:"message,omitempty"`
 }
 

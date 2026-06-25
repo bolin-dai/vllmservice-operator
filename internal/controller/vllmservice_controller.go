@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	aiinfrav1alpha1 "github.com/bolin-dai/vllmservice-operator/api/v1alpha1"
+	intstr "k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // VLLMServiceReconciler reconciles a VLLMService object
@@ -43,6 +44,7 @@ type VLLMServiceReconciler struct {
 // +kubebuilder:rbac:groups=aiinfra.example.com,resources=vllmservices/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=aiinfra.example.com,resources=vllmservices/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -104,7 +106,43 @@ func (r *VLLMServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		"Deployment同步完成", "operation", operation, "namespace", deployment.Namespace, "name", deployment.Name,
 	)
 
-	if err := r.updateVLLMServiceStatus(ctx, vllmService, deployment); err != nil {
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      vllmService.Name,
+			Namespace: vllmService.Namespace,
+		},
+	}
+
+	serviceOperation, err := controllerutil.CreateOrUpdate(ctx, r.Client, service, func() error {
+		service.Labels = labelsForVLLMService(vllmService)
+
+		service.Spec.Type = corev1.ServiceTypeClusterIP
+		service.Spec.Selector = selectorLabelsForVLLMService(vllmService.Name)
+		service.Spec.Ports = []corev1.ServicePort{
+			{
+				Name:       "http",
+				Protocol:   corev1.ProtocolTCP,
+				Port:       portFor(vllmService),
+				TargetPort: intstr.FromString("http"),
+			},
+		}
+
+		return controllerutil.SetControllerReference(vllmService, service, r.Scheme)
+	})
+
+	if err != nil {
+		logger.Error(err, "创建或更新Service失败")
+		return ctrl.Result{}, err
+	}
+
+	logger.Info(
+		"Service同步完成",
+		"operation", serviceOperation,
+		"namespace", service.Namespace,
+		"name", service.Name,
+	)
+
+	if err := r.updateVLLMServiceStatus(ctx, vllmService, deployment, service); err != nil {
 		logger.Error(err, "更新VLLMService status失败")
 		return ctrl.Result{}, err
 	}
@@ -235,13 +273,20 @@ func (r *VLLMServiceReconciler) updateVLLMServiceStatus(
 	ctx context.Context,
 	vllmservice *aiinfrav1alpha1.VLLMService,
 	deployment *appsv1.Deployment,
+	service *corev1.Service,
 ) error {
 
 	phase, message := phaseAndMessageFromDeployment(deployment)
 
+	serviceName := ""
+	if service != nil {
+		serviceName = service.Name
+	}
+
 	if vllmservice.Status.Phase == phase &&
 		vllmservice.Status.ReadyReplicas == deployment.Status.ReadyReplicas &&
 		vllmservice.Status.DeploymentName == deployment.Name &&
+		vllmservice.Status.ServiceName == serviceName &&
 		vllmservice.Status.Message == message {
 		return nil
 	}
@@ -249,6 +294,7 @@ func (r *VLLMServiceReconciler) updateVLLMServiceStatus(
 	vllmservice.Status.Phase = phase
 	vllmservice.Status.ReadyReplicas = deployment.Status.ReadyReplicas
 	vllmservice.Status.DeploymentName = deployment.Name
+	vllmservice.Status.ServiceName = serviceName
 	vllmservice.Status.Message = message
 
 	return r.Status().Update(ctx, vllmservice)
@@ -352,6 +398,7 @@ func (r *VLLMServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&aiinfrav1alpha1.VLLMService{}).
 		Owns(&appsv1.Deployment{}).
+		Owns(&corev1.Service{}).
 		Named("vllmservice").
 		Complete(r)
 }
