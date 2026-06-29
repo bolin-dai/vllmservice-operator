@@ -39,6 +39,30 @@ spec:
           spec:
             description: spec defines the desired state of VLLMService
             properties:
+              gatewayRef:
+                description: GatewayRef 表示当前VLLMService要挂载到哪个Gateway上。 不填写gatewayRef时，operator只创建Deployment和service，不创建HTTPRoute
+                properties:
+                  host:
+                    description: Host是HTTPRoute要匹配的域名。后面创建HTTPRoute时，会写入spec.hostnames
+                    minLength: 1
+                    type: string
+                  name:
+                    description: name是要引用的Gateway名称
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: Namespace是Gateway所在命名空间。如果不填写，默认认为Gateway和当前VLLMService在同一个命名空间。
+                    minLength: 1
+                    type: string
+                  sectionName:
+                    description: SectionName 是要绑定的Gateway listener名称。后面创建HTTPRoute时，会写入parentRefs.sectionName
+                    minLength: 1
+                    type: string
+                required:
+                - host
+                - name
+                - sectionName
+                type: object
               image:
                 minLength: 1
                 type: string
@@ -161,6 +185,15 @@ spec:
             description: status defines the observed state of VLLMService
             properties:
               deploymentName:
+                type: string
+              gatewayRefName:
+                description: GatewayRefName 表示当前VLLMService引用的Gateway名称。 注意： 这不是operator创建的Gateway，而是引用
+                type: string
+              gatewayRefNamespace:
+                description: GatewayRefNamespace 表示当前VLLMService引用的Gateway所在命名空间
+                type: string
+              httpRouteName:
+                description: HTTPRouteName 表示operator为当前VLLMService创建的HTTPRoute名称
                 type: string
               message:
                 type: string

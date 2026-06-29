@@ -41,6 +41,33 @@ type VLLMServiceStorageSpec struct {
 	SubPath string `json:"subPath,omitempty"`
 }
 
+/*
+VLLMServiceGatewayRef 表示当前VLLMService要引用的已有的Gateway
+注意： 这里是引用Gateway,不是创建Gateway
+Gateway通常是平台侧提前创建好的共享入口资源
+*/
+type VLLMServiceGatewayRef struct {
+	// name是要引用的Gateway名称
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	//Namespace是Gateway所在命名空间。如果不填写，默认认为Gateway和当前VLLMService在同一个命名空间。
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	Namespace string `json:"namespace,omitempty"`
+
+	// SectionName 是要绑定的Gateway listener名称。后面创建HTTPRoute时，会写入parentRefs.sectionName
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	SectionName string `json:"sectionName"`
+
+	// Host是HTTPRoute要匹配的域名。后面创建HTTPRoute时，会写入spec.hostnames
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Host string `json:"host"`
+}
+
 // VLLMServiceSpec defines the desired state of VLLMService
 type VLLMServiceSpec struct {
 
@@ -79,6 +106,10 @@ type VLLMServiceSpec struct {
 	// +kubebuilder:validation:Maximum=65535
 	Port int32 `json:"port,omitempty"`
 
+	//GatewayRef 表示当前VLLMService要挂载到哪个Gateway上。 不填写gatewayRef时，operator只创建Deployment和service，不创建HTTPRoute
+	// +optional
+	GatewayRef *VLLMServiceGatewayRef `json:"gatewayRef,omitempty"`
+
 	// +kubebuilder:validation:Required
 	Resources corev1.ResourceRequirements `json:"resources"`
 
@@ -114,6 +145,18 @@ type VLLMServiceStatus struct {
 
 	// +optional
 	ServiceName string `json:"serviceName,omitempty"`
+
+	// GatewayRefName 表示当前VLLMService引用的Gateway名称。 注意： 这不是operator创建的Gateway，而是引用
+	// +optional
+	GatewayRefName string `json:"gatewayRefName,omitempty"`
+
+	// GatewayRefNamespace 表示当前VLLMService引用的Gateway所在命名空间
+	// +optional
+	GatewayRefNamespace string `json:"gatewayRefNamespace,omitempty"`
+
+	// HTTPRouteName 表示operator为当前VLLMService创建的HTTPRoute名称
+	// +optionoal
+	HTTPRouteName string `json:"httpRouteName,omitempty"`
 
 	// +optional
 	Message string `json:"message,omitempty"`
