@@ -184,7 +184,7 @@ func (r *VLLMServiceReconciler) reconcileHTTPRoute(
 	}
 
 	// spec.gatewayRef存在，先解析引用的Gateway
-	gateway, routeMessage, requeueAfter, err := r.resolvGatewayRef(ctx, vllmService)
+	gateway, routeMessage, requeueAfter, err := r.resolveGatewayRef(ctx, vllmService)
 	if err != nil {
 		return nil, "", 0, err
 	}
@@ -265,7 +265,7 @@ func (r *VLLMServiceReconciler) reconcileHTTPRoute(
 
 }
 
-func (r *VLLMServiceReconciler) resolvGatewayRef(
+func (r *VLLMServiceReconciler) resolveGatewayRef(
 	ctx context.Context,
 	vllmService *aiinfrav1alpha1.VLLMService,
 ) (*gatewayv1.Gateway, string, time.Duration, error) {
@@ -302,7 +302,7 @@ func (r *VLLMServiceReconciler) resolvGatewayRef(
 			sectionName,
 			listener.Protocol,
 		)
-		return nil, message, time.Minute, nil
+		return nil, message, 0, nil
 	}
 
 	return gateway, "", 0, nil

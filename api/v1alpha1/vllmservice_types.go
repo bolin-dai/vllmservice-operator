@@ -42,7 +42,7 @@ type VLLMServiceStorageSpec struct {
 }
 
 /*
-VLLMServiceGatewayRef 表示当前VLLMService要引用的已有的Gateway
+VLLMServiceGatewayRef 表示当前VLLMService要引用的已有的Gateway。
 注意： 这里是引用Gateway,不是创建Gateway
 Gateway通常是平台侧提前创建好的共享入口资源
 */
