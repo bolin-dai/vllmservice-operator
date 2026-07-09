@@ -21,6 +21,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	VLLMServiceConditionAvailable       = "Available"
+	VLLMServiceConditionDeploymentReady = "DeploymentReady"
+	VLLMServiceConditionStorageReady    = "StorageReady"
+	VLLMServiceConditionRouteReady      = "RouteReady"
+)
+
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 type VLLMServiceStorageSpec struct {
@@ -133,6 +140,17 @@ type VLLMServiceStatus struct {
 	// - "Progressing": the resource is being created or updated
 	// - "Degraded": the resource failed to reach or maintain its desired state
 	//
+
+	//ObservedGeneration 表示当前status是根据哪一版 VLLMService spec计算出来的
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Conditions表示VLLMService各个组成部分的当前状态
+	// 每一种 Condition Type在列表中只能存在一条
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// +optional
 	Phase string `json:"phase,omitempty"`

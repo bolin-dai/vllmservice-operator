@@ -26,6 +26,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -108,6 +109,45 @@ var _ = Describe("VLLMService Controller", func() {
 			Expect(deployment.Namespace).To(Equal("default"))
 			Expect(deployment.Spec.Template.Spec.Containers).NotTo(BeEmpty())
 			Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal("docker.m.daocloud.io/vllm/vllm-openai:latest"))
+
+			By("Checking VLLMService status conditions")
+
+			updatedVLLMService := &aiinfrav1alpha1.VLLMService{}
+
+			Expect(
+				k8sClient.Get(ctx, typeNamespacedName, updatedVLLMService),
+			).To(Succeed())
+
+			Expect(updatedVLLMService.Status.ObservedGeneration).To(
+				Equal(updatedVLLMService.Generation),
+			)
+
+			storageCondition := apimeta.FindStatusCondition(
+				updatedVLLMService.Status.Conditions,
+				aiinfrav1alpha1.VLLMServiceConditionStorageReady,
+			)
+
+			Expect(storageCondition).NotTo(BeNil())
+			Expect(storageCondition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(storageCondition.Reason).To(Equal("PVCNotFound"))
+
+			routeCondition := apimeta.FindStatusCondition(
+				updatedVLLMService.Status.Conditions,
+				aiinfrav1alpha1.VLLMServiceConditionRouteReady,
+			)
+
+			Expect(routeCondition).NotTo(BeNil())
+			Expect(routeCondition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(routeCondition.Reason).To(Equal("RouteNotRequired"))
+
+			availableCondition := apimeta.FindStatusCondition(
+				updatedVLLMService.Status.Conditions,
+				aiinfrav1alpha1.VLLMServiceConditionAvailable,
+			)
+
+			Expect(availableCondition).NotTo(BeNil())
+			Expect(availableCondition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(availableCondition.Reason).To(Equal("ComponentsNotReady"))
 		})
 	})
 })

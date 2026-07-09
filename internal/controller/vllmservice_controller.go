@@ -19,20 +19,22 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	aiinfrav1alpha1 "github.com/bolin-dai/vllmservice-operator/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	aiinfrav1alpha1 "github.com/bolin-dai/vllmservice-operator/api/v1alpha1"
-	intstr "k8s.io/apimachinery/pkg/util/intstr"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
@@ -47,18 +49,9 @@ type VLLMServiceReconciler struct {
 // +kubebuilder:rbac:groups=aiinfra.example.com,resources=vllmservices/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
-
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the VLLMService object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/reconcile
 func (r *VLLMServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -79,7 +72,6 @@ func (r *VLLMServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	operation, err := controllerutil.CreateOrUpdate(ctx, r.Client, deployment, func() error {
 		selectorLabels := selectorLabelsForVLLMService(vllmService.Name)
-
 		objectLabels := labelsForVLLMService(vllmService)
 
 		deployment.Labels = objectLabels
@@ -91,23 +83,23 @@ func (r *VLLMServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 
 		deployment.Spec.Replicas = replicasFor(vllmService)
-
 		deployment.Spec.Template = buildPodTemplate(vllmService)
-
 		deployment.Spec.RevisionHistoryLimit = int32Ptr(10)
-
 		deployment.Spec.ProgressDeadlineSeconds = int32Ptr(600)
 
 		return controllerutil.SetControllerReference(vllmService, deployment, r.Scheme)
 	})
 
 	if err != nil {
-		logger.Error(err, "创建或更新deployment失败")
+		logger.Error(err, "创建或更新 Deployment 失败")
 		return ctrl.Result{}, err
 	}
 
 	logger.Info(
-		"Deployment同步完成", "operation", operation, "namespace", deployment.Namespace, "name", deployment.Name,
+		"Deployment 同步完成",
+		"operation", operation,
+		"namespace", deployment.Namespace,
+		"name", deployment.Name,
 	)
 
 	service := &corev1.Service{
@@ -135,29 +127,44 @@ func (r *VLLMServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	})
 
 	if err != nil {
-		logger.Error(err, "创建或更新Service失败")
+		logger.Error(err, "创建或更新 Service 失败")
 		return ctrl.Result{}, err
 	}
 
 	logger.Info(
-		"Service同步完成",
+		"Service 同步完成",
 		"operation", serviceOperation,
 		"namespace", service.Namespace,
 		"name", service.Name,
 	)
 
-	// 同步 HTTPRoute。
-	// 如果 spec.gatewayRef 不存在，reconcileHTTPRoute 会删除当前 VLLMService 拥有的 HTTPRoute。
-	// 如果 spec.gatewayRef 存在，会先检查 Gateway 是否存在，再创建或更新 HTTPRoute。
 	httpRoute, routeMessage, requeueAfter, err := r.reconcileHTTPRoute(ctx, vllmService, service)
 	if err != nil {
-		logger.Error(err, "同步HTTPRoute失败")
+		logger.Error(err, "同步 HTTPRoute 失败")
 		return ctrl.Result{}, err
 	}
 
-	if err := r.updateVLLMServiceStatus(ctx, vllmService, deployment, service, httpRoute, routeMessage); err != nil {
-		logger.Error(err, "更新VLLMService status失败")
+	if err := r.updateVLLMServiceStatus(
+		ctx,
+		vllmService,
+		deployment,
+		service,
+		httpRoute,
+		routeMessage,
+	); err != nil {
+		logger.Error(err, "更新 VLLMService status 失败")
 		return ctrl.Result{}, err
+	}
+
+	if !apimeta.IsStatusConditionTrue(
+		vllmService.Status.Conditions,
+		aiinfrav1alpha1.VLLMServiceConditionAvailable,
+	) {
+		const statusRefreshInterval = 15 * time.Second
+
+		if requeueAfter == 0 || requeueAfter > statusRefreshInterval {
+			requeueAfter = statusRefreshInterval
+		}
 	}
 
 	if requeueAfter > 0 {
@@ -174,8 +181,6 @@ func (r *VLLMServiceReconciler) reconcileHTTPRoute(
 ) (*gatewayv1.HTTPRoute, string, time.Duration, error) {
 	logger := log.FromContext(ctx)
 
-	// spec.gatewayRef不存在，表示当前VLLMService不需要接入Gateway
-	// 这是只是删除当前VLLMService自己拥有的HTTPRoute,不删除Gateway
 	if !gatewayRefEnabled(vllmService) {
 		if err := r.deleteOwnedHTTPRouteIfExists(ctx, vllmService); err != nil {
 			return nil, "", 0, err
@@ -183,14 +188,11 @@ func (r *VLLMServiceReconciler) reconcileHTTPRoute(
 		return nil, "", 0, nil
 	}
 
-	// spec.gatewayRef存在，先解析引用的Gateway
 	gateway, routeMessage, requeueAfter, err := r.resolveGatewayRef(ctx, vllmService)
 	if err != nil {
 		return nil, "", 0, err
 	}
 
-	// 如果 Gateway 不存在、listener 不存在，或者 listener 协议不适合 HTTPRoute，
-	// 就不创建 HTTPRoute，并删除旧的 HTTPRoute，避免旧路由继续暴露服务。
 	if gateway == nil {
 		if err := r.deleteOwnedHTTPRouteIfExists(ctx, vllmService); err != nil {
 			return nil, routeMessage, requeueAfter, err
@@ -256,13 +258,13 @@ func (r *VLLMServiceReconciler) reconcileHTTPRoute(
 	}
 
 	logger.Info(
-		"HTTPRoute同步完成",
+		"HTTPRoute 同步完成",
 		"operation", httpRouteOperation,
 		"namespace", httpRoute.Namespace,
 		"name", httpRoute.Name,
 	)
-	return httpRoute, "", 0, nil
 
+	return httpRoute, "", 0, nil
 }
 
 func (r *VLLMServiceReconciler) resolveGatewayRef(
@@ -278,25 +280,31 @@ func (r *VLLMServiceReconciler) resolveGatewayRef(
 		Name:      gatewayName,
 		Namespace: gatewayNamespace,
 	}, gateway)
+
 	if apierrors.IsNotFound(err) {
-		message := fmt.Sprintf("引用的Gateway不存在: %s/%s", gatewayNamespace, gatewayName)
+		message := fmt.Sprintf("引用的 Gateway 不存在：%s/%s", gatewayNamespace, gatewayName)
 		return nil, message, time.Minute, nil
 	}
+
 	if err != nil {
 		return nil, "", 0, err
 	}
 
 	listener, found := findGatewayListener(gateway, sectionName)
 	if !found {
-		message := fmt.Sprintf("引用的Gateway存在, 但找不到listener: gateway= %s/%s sectionName=%s", gatewayNamespace, gatewayName, sectionName)
+		message := fmt.Sprintf(
+			"引用的 Gateway 存在，但找不到 listener：gateway=%s/%s sectionName=%s",
+			gatewayNamespace,
+			gatewayName,
+			sectionName,
+		)
 		return nil, message, time.Minute, nil
 	}
 
-	// HTTPRoute 一般应该绑定到 HTTP 或 HTTPS listener。
-	// 如果 listener 是 TCP、TLS、UDP 等协议，HTTPRoute 不适合绑定。
-	if listener.Protocol != gatewayv1.HTTPProtocolType && listener.Protocol != gatewayv1.HTTPSProtocolType {
+	if listener.Protocol != gatewayv1.HTTPProtocolType &&
+		listener.Protocol != gatewayv1.HTTPSProtocolType {
 		message := fmt.Sprintf(
-			"引用的Gateway listener协议不是HTTP/HTTPS: gateway=%s/%s sectionName=%s protocol=%s",
+			"引用的 Gateway listener 协议不是 HTTP/HTTPS：gateway=%s/%s sectionName=%s protocol=%s",
 			gatewayNamespace,
 			gatewayName,
 			sectionName,
@@ -306,17 +314,13 @@ func (r *VLLMServiceReconciler) resolveGatewayRef(
 	}
 
 	return gateway, "", 0, nil
-
 }
 
 func gatewayRefEnabled(vllmService *aiinfrav1alpha1.VLLMService) bool {
-	// gatewayRef 不为nil，表示用户希望当前VLLMService接入已有Gateway
-	// gatewayRef 为nil，表示不接入Gateway
 	return vllmService.Spec.GatewayRef != nil
 }
 
 func gatewayRefNamespaceFor(vllmService *aiinfrav1alpha1.VLLMService) string {
-	// 如果用户没有写gatewayRef.namespace,就默认Gateway和VLLMService在同一个namespace
 	if vllmService.Spec.GatewayRef.Namespace == "" {
 		return vllmService.Namespace
 	}
@@ -354,10 +358,9 @@ func (r *VLLMServiceReconciler) deleteOwnedHTTPRouteIfExists(
 		return err
 	}
 
-	// 只删除当前VLLMService拥有的HTTPRoute，如果当前同名HTTPRoute是用户手工创建的，或者属于其他控制器，不删除，避免误删
 	if !metav1.IsControlledBy(httpRoute, vllmService) {
 		logger.Info(
-			"发现同名HTTPRoute, 但它不是当前VLLMService控制的资源,跳过删除",
+			"发现同名 HTTPRoute，但它不是当前 VLLMService 控制的资源，跳过删除",
 			"namespace", httpRoute.Namespace,
 			"name", httpRoute.Name,
 		)
@@ -369,12 +372,12 @@ func (r *VLLMServiceReconciler) deleteOwnedHTTPRouteIfExists(
 	}
 
 	logger.Info(
-		"HTTPRoute已删除",
+		"HTTPRoute 已删除",
 		"namespace", httpRoute.Namespace,
 		"name", httpRoute.Name,
 	)
-	return nil
 
+	return nil
 }
 
 func buildPodTemplate(vllmService *aiinfrav1alpha1.VLLMService) corev1.PodTemplateSpec {
@@ -415,20 +418,18 @@ func buildPodTemplate(vllmService *aiinfrav1alpha1.VLLMService) corev1.PodTempla
 		},
 		Spec: podSpec,
 	}
-
 }
 
-func buildVLLMContainer(vllmservice *aiinfrav1alpha1.VLLMService) corev1.Container {
-	port := portFor(vllmservice)
+func buildVLLMContainer(vllmService *aiinfrav1alpha1.VLLMService) corev1.Container {
+	port := portFor(vllmService)
 
 	return corev1.Container{
 		Name:            "vllm",
-		Image:           vllmservice.Spec.Image,
+		Image:           vllmService.Spec.Image,
 		ImagePullPolicy: corev1.PullIfNotPresent,
-
 		Args: []string{
-			"--model", vllmservice.Spec.ModelPath,
-			"--served-model-name", vllmservice.Spec.ModelName,
+			"--model", vllmService.Spec.ModelPath,
+			"--served-model-name", vllmService.Spec.ModelName,
 			"--host", "0.0.0.0",
 			"--port", fmt.Sprintf("%d", port),
 			"--dtype", "auto",
@@ -436,7 +437,6 @@ func buildVLLMContainer(vllmservice *aiinfrav1alpha1.VLLMService) corev1.Contain
 			"--gpu-memory-utilization", "0.75",
 			"--max-num-seqs", "8",
 		},
-
 		Ports: []corev1.ContainerPort{
 			{
 				Name:          "http",
@@ -444,14 +444,12 @@ func buildVLLMContainer(vllmservice *aiinfrav1alpha1.VLLMService) corev1.Contain
 				Protocol:      corev1.ProtocolTCP,
 			},
 		},
-
-		Resources: vllmservice.Spec.Resources,
+		Resources: vllmService.Spec.Resources,
 	}
-
 }
 
-func buildModelVolumesAndMounts(vllmservice *aiinfrav1alpha1.VLLMService) ([]corev1.Volume, []corev1.VolumeMount) {
-	storage := vllmservice.Spec.Storage
+func buildModelVolumesAndMounts(vllmService *aiinfrav1alpha1.VLLMService) ([]corev1.Volume, []corev1.VolumeMount) {
+	storage := vllmService.Spec.Storage
 
 	if storage.PVCName == "" {
 		return nil, nil
@@ -491,17 +489,474 @@ func buildModelVolumesAndMounts(vllmservice *aiinfrav1alpha1.VLLMService) ([]cor
 	volumeMounts := []corev1.VolumeMount{volumeMount}
 
 	return volumes, volumeMounts
+}
 
+func newVLLMServiceCondition(
+	vllmService *aiinfrav1alpha1.VLLMService,
+	conditionType string,
+	status metav1.ConditionStatus,
+	reason string,
+	message string,
+) metav1.Condition {
+	return metav1.Condition{
+		Type:               conditionType,
+		Status:             status,
+		ObservedGeneration: vllmService.Generation,
+		Reason:             reason,
+		Message:            message,
+	}
+}
+
+func deploymentReadyCondition(
+	vllmService *aiinfrav1alpha1.VLLMService,
+	deployment *appsv1.Deployment,
+) metav1.Condition {
+	if deployment == nil {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionDeploymentReady,
+			metav1.ConditionUnknown,
+			"DeploymentNotObserved",
+			"尚未获取到 Deployment",
+		)
+	}
+
+	desiredReplicas := int32(1)
+	if deployment.Spec.Replicas != nil {
+		desiredReplicas = *deployment.Spec.Replicas
+	}
+
+	if deployment.Status.ObservedGeneration < deployment.Generation {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionDeploymentReady,
+			metav1.ConditionUnknown,
+			"DeploymentStatusStale",
+			fmt.Sprintf(
+				"Deployment Controller 尚未处理最新配置：observedGeneration=%d, generation=%d",
+				deployment.Status.ObservedGeneration,
+				deployment.Generation,
+			),
+		)
+	}
+
+	deploymentAvailable := false
+
+	for _, condition := range deployment.Status.Conditions {
+		switch condition.Type {
+		case appsv1.DeploymentReplicaFailure:
+			if condition.Status == corev1.ConditionTrue {
+				return newVLLMServiceCondition(
+					vllmService,
+					aiinfrav1alpha1.VLLMServiceConditionDeploymentReady,
+					metav1.ConditionFalse,
+					"DeploymentReplicaFailure",
+					condition.Message,
+				)
+			}
+
+		case appsv1.DeploymentProgressing:
+			if condition.Status == corev1.ConditionFalse &&
+				condition.Reason == "ProgressDeadlineExceeded" {
+				return newVLLMServiceCondition(
+					vllmService,
+					aiinfrav1alpha1.VLLMServiceConditionDeploymentReady,
+					metav1.ConditionFalse,
+					"ProgressDeadlineExceeded",
+					condition.Message,
+				)
+			}
+
+		case appsv1.DeploymentAvailable:
+			if condition.Status == corev1.ConditionTrue {
+				deploymentAvailable = true
+			}
+		}
+	}
+
+	if deploymentAvailable &&
+		deployment.Status.ReadyReplicas >= desiredReplicas &&
+		deployment.Status.AvailableReplicas >= desiredReplicas {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionDeploymentReady,
+			metav1.ConditionTrue,
+			"DeploymentAvailable",
+			fmt.Sprintf(
+				"Deployment 已达到期望副本数：readyReplicas=%d/%d, availableReplicas=%d/%d",
+				deployment.Status.ReadyReplicas,
+				desiredReplicas,
+				deployment.Status.AvailableReplicas,
+				desiredReplicas,
+			),
+		)
+	}
+
+	return newVLLMServiceCondition(
+		vllmService,
+		aiinfrav1alpha1.VLLMServiceConditionDeploymentReady,
+		metav1.ConditionFalse,
+		"DeploymentProgressing",
+		fmt.Sprintf(
+			"Deployment 正在启动或更新：readyReplicas=%d/%d, availableReplicas=%d/%d",
+			deployment.Status.ReadyReplicas,
+			desiredReplicas,
+			deployment.Status.AvailableReplicas,
+			desiredReplicas,
+		),
+	)
+}
+
+func (r *VLLMServiceReconciler) storageReadyCondition(
+	ctx context.Context,
+	vllmService *aiinfrav1alpha1.VLLMService,
+) (metav1.Condition, error) {
+	pvcName := vllmService.Spec.Storage.PVCName
+
+	if pvcName == "" {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionStorageReady,
+			metav1.ConditionFalse,
+			"PVCNameMissing",
+			"spec.storage.pvcName 不能为空",
+		), nil
+	}
+
+	pvc := &corev1.PersistentVolumeClaim{}
+
+	err := r.Get(ctx, client.ObjectKey{
+		Name:      pvcName,
+		Namespace: vllmService.Namespace,
+	}, pvc)
+
+	if apierrors.IsNotFound(err) {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionStorageReady,
+			metav1.ConditionFalse,
+			"PVCNotFound",
+			fmt.Sprintf(
+				"PVC %s/%s 不存在",
+				vllmService.Namespace,
+				pvcName,
+			),
+		), nil
+	}
+
+	if err != nil {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionStorageReady,
+			metav1.ConditionUnknown,
+			"PVCCheckFailed",
+			fmt.Sprintf("读取 PVC 状态失败：%v", err),
+		), err
+	}
+
+	switch pvc.Status.Phase {
+	case corev1.ClaimBound:
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionStorageReady,
+			metav1.ConditionTrue,
+			"PVCBound",
+			fmt.Sprintf(
+				"PVC %s/%s 已绑定到 PV %s",
+				pvc.Namespace,
+				pvc.Name,
+				pvc.Spec.VolumeName,
+			),
+		), nil
+
+	case corev1.ClaimLost:
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionStorageReady,
+			metav1.ConditionFalse,
+			"PVCLost",
+			fmt.Sprintf(
+				"PVC %s/%s 已丢失其绑定的 PersistentVolume",
+				pvc.Namespace,
+				pvc.Name,
+			),
+		), nil
+
+	default:
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionStorageReady,
+			metav1.ConditionFalse,
+			"PVCNotBound",
+			fmt.Sprintf(
+				"PVC %s/%s 尚未绑定，当前状态为 %s",
+				pvc.Namespace,
+				pvc.Name,
+				pvc.Status.Phase,
+			),
+		), nil
+	}
+}
+
+func findHTTPRouteParentStatus(
+	vllmService *aiinfrav1alpha1.VLLMService,
+	httpRoute *gatewayv1.HTTPRoute,
+) *gatewayv1.RouteParentStatus {
+	if vllmService.Spec.GatewayRef == nil {
+		return nil
+	}
+
+	expectedGatewayName := vllmService.Spec.GatewayRef.Name
+	expectedGatewayNamespace := gatewayRefNamespaceFor(vllmService)
+	expectedSectionName := vllmService.Spec.GatewayRef.SectionName
+
+	for i := range httpRoute.Status.Parents {
+		parentStatus := &httpRoute.Status.Parents[i]
+
+		if string(parentStatus.ParentRef.Name) != expectedGatewayName {
+			continue
+		}
+
+		parentNamespace := httpRoute.Namespace
+		if parentStatus.ParentRef.Namespace != nil {
+			parentNamespace = string(*parentStatus.ParentRef.Namespace)
+		}
+
+		if parentNamespace != expectedGatewayNamespace {
+			continue
+		}
+
+		if expectedSectionName != "" {
+			if parentStatus.ParentRef.SectionName == nil {
+				continue
+			}
+
+			if string(*parentStatus.ParentRef.SectionName) != expectedSectionName {
+				continue
+			}
+		}
+
+		return parentStatus
+	}
+
+	return nil
+}
+
+func routeReadyCondition(
+	vllmService *aiinfrav1alpha1.VLLMService,
+	httpRoute *gatewayv1.HTTPRoute,
+	routeMessage string,
+) metav1.Condition {
+	if !gatewayRefEnabled(vllmService) {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionRouteReady,
+			metav1.ConditionTrue,
+			"RouteNotRequired",
+			"未配置 gatewayRef，不需要创建 HTTPRoute",
+		)
+	}
+
+	if routeMessage != "" {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionRouteReady,
+			metav1.ConditionFalse,
+			"GatewayReferenceInvalid",
+			routeMessage,
+		)
+	}
+
+	if httpRoute == nil {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionRouteReady,
+			metav1.ConditionUnknown,
+			"HTTPRoutePending",
+			"HTTPRoute 尚未创建或尚未获取到状态",
+		)
+	}
+
+	parentStatus := findHTTPRouteParentStatus(vllmService, httpRoute)
+	if parentStatus == nil {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionRouteReady,
+			metav1.ConditionUnknown,
+			"RouteParentStatusPending",
+			"HTTPRoute 尚未生成对应 Gateway 的 Parent Status",
+		)
+	}
+
+	accepted := apimeta.FindStatusCondition(
+		parentStatus.Conditions,
+		string(gatewayv1.RouteConditionAccepted),
+	)
+
+	if accepted == nil {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionRouteReady,
+			metav1.ConditionUnknown,
+			"RouteAcceptedStatusPending",
+			"HTTPRoute 尚未生成 Accepted Condition",
+		)
+	}
+
+	if accepted.ObservedGeneration < httpRoute.Generation {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionRouteReady,
+			metav1.ConditionUnknown,
+			"HTTPRouteStatusStale",
+			fmt.Sprintf(
+				"HTTPRoute Controller 尚未处理最新配置：observedGeneration=%d, generation=%d",
+				accepted.ObservedGeneration,
+				httpRoute.Generation,
+			),
+		)
+	}
+
+	if accepted.Status != metav1.ConditionTrue {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionRouteReady,
+			accepted.Status,
+			"RouteNotAccepted",
+			fmt.Sprintf(
+				"HTTPRoute 尚未被 Gateway 接受：reason=%s, message=%s",
+				accepted.Reason,
+				accepted.Message,
+			),
+		)
+	}
+
+	resolvedRefs := apimeta.FindStatusCondition(
+		parentStatus.Conditions,
+		string(gatewayv1.RouteConditionResolvedRefs),
+	)
+
+	if resolvedRefs == nil {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionRouteReady,
+			metav1.ConditionUnknown,
+			"ResolvedRefsStatusPending",
+			"HTTPRoute 尚未生成 ResolvedRefs Condition",
+		)
+	}
+
+	if resolvedRefs.ObservedGeneration < httpRoute.Generation {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionRouteReady,
+			metav1.ConditionUnknown,
+			"HTTPRouteStatusStale",
+			fmt.Sprintf(
+				"HTTPRoute ResolvedRefs 状态尚未处理最新配置：observedGeneration=%d, generation=%d",
+				resolvedRefs.ObservedGeneration,
+				httpRoute.Generation,
+			),
+		)
+	}
+
+	if resolvedRefs.Status != metav1.ConditionTrue {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionRouteReady,
+			resolvedRefs.Status,
+			"RouteReferencesNotResolved",
+			fmt.Sprintf(
+				"HTTPRoute 后端引用未正确解析：reason=%s, message=%s",
+				resolvedRefs.Reason,
+				resolvedRefs.Message,
+			),
+		)
+	}
+
+	return newVLLMServiceCondition(
+		vllmService,
+		aiinfrav1alpha1.VLLMServiceConditionRouteReady,
+		metav1.ConditionTrue,
+		"RouteAccepted",
+		fmt.Sprintf(
+			"HTTPRoute %s/%s 已被 Gateway 接受，后端引用已正确解析",
+			httpRoute.Namespace,
+			httpRoute.Name,
+		),
+	)
+}
+
+func availableCondition(
+	vllmService *aiinfrav1alpha1.VLLMService,
+	deploymentCondition metav1.Condition,
+	storageCondition metav1.Condition,
+	routeCondition metav1.Condition,
+) metav1.Condition {
+	componentConditions := []metav1.Condition{
+		deploymentCondition,
+		storageCondition,
+		routeCondition,
+	}
+
+	var falseConditions []string
+	var unknownConditions []string
+
+	for _, condition := range componentConditions {
+		switch condition.Status {
+		case metav1.ConditionFalse:
+			falseConditions = append(
+				falseConditions,
+				fmt.Sprintf("%s(%s)", condition.Type, condition.Reason),
+			)
+
+		case metav1.ConditionUnknown:
+			unknownConditions = append(
+				unknownConditions,
+				fmt.Sprintf("%s(%s)", condition.Type, condition.Reason),
+			)
+		}
+	}
+
+	if len(falseConditions) > 0 {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionAvailable,
+			metav1.ConditionFalse,
+			"ComponentsNotReady",
+			"以下组件尚未就绪："+strings.Join(falseConditions, ", "),
+		)
+	}
+
+	if len(unknownConditions) > 0 {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionAvailable,
+			metav1.ConditionUnknown,
+			"ComponentStatusUnknown",
+			"以下组件状态尚未确定："+strings.Join(unknownConditions, ", "),
+		)
+	}
+
+	return newVLLMServiceCondition(
+		vllmService,
+		aiinfrav1alpha1.VLLMServiceConditionAvailable,
+		metav1.ConditionTrue,
+		"AllComponentsReady",
+		"Deployment、Storage 和 Route 均已就绪",
+	)
 }
 
 func (r *VLLMServiceReconciler) updateVLLMServiceStatus(
 	ctx context.Context,
-	vllmservice *aiinfrav1alpha1.VLLMService,
+	vllmService *aiinfrav1alpha1.VLLMService,
 	deployment *appsv1.Deployment,
 	service *corev1.Service,
 	httpRoute *gatewayv1.HTTPRoute,
 	routeMessage string,
 ) error {
+	before := vllmService.DeepCopy()
+
 	phase, message := phaseAndMessageFromDeployment(deployment)
 
 	if routeMessage != "" {
@@ -519,9 +974,10 @@ func (r *VLLMServiceReconciler) updateVLLMServiceStatus(
 
 	gatewayRefName := ""
 	gatewayRefNamespace := ""
-	if vllmservice.Spec.GatewayRef != nil {
-		gatewayRefName = vllmservice.Spec.GatewayRef.Name
-		gatewayRefNamespace = gatewayRefNamespaceFor(vllmservice)
+
+	if vllmService.Spec.GatewayRef != nil {
+		gatewayRefName = vllmService.Spec.GatewayRef.Name
+		gatewayRefNamespace = gatewayRefNamespaceFor(vllmService)
 	}
 
 	httpRouteName := ""
@@ -529,27 +985,75 @@ func (r *VLLMServiceReconciler) updateVLLMServiceStatus(
 		httpRouteName = httpRoute.Name
 	}
 
-	if vllmservice.Status.Phase == phase &&
-		vllmservice.Status.ReadyReplicas == deployment.Status.ReadyReplicas &&
-		vllmservice.Status.DeploymentName == deployment.Name &&
-		vllmservice.Status.ServiceName == serviceName &&
-		vllmservice.Status.GatewayRefName == gatewayRefName &&
-		vllmservice.Status.GatewayRefNamespace == gatewayRefNamespace &&
-		vllmservice.Status.HTTPRouteName == httpRouteName &&
-		vllmservice.Status.Message == message {
-		return nil
+	deploymentCondition := deploymentReadyCondition(
+		vllmService,
+		deployment,
+	)
+
+	storageCondition, storageErr := r.storageReadyCondition(
+		ctx,
+		vllmService,
+	)
+
+	routeCondition := routeReadyCondition(
+		vllmService,
+		httpRoute,
+		routeMessage,
+	)
+
+	overallAvailableCondition := availableCondition(
+		vllmService,
+		deploymentCondition,
+		storageCondition,
+		routeCondition,
+	)
+
+	vllmService.Status.ObservedGeneration = vllmService.Generation
+	vllmService.Status.Phase = phase
+	vllmService.Status.ReadyReplicas = deployment.Status.ReadyReplicas
+	vllmService.Status.DeploymentName = deployment.Name
+	vllmService.Status.ServiceName = serviceName
+	vllmService.Status.GatewayRefName = gatewayRefName
+	vllmService.Status.GatewayRefNamespace = gatewayRefNamespace
+	vllmService.Status.HTTPRouteName = httpRouteName
+	vllmService.Status.Message = message
+
+	apimeta.SetStatusCondition(
+		&vllmService.Status.Conditions,
+		deploymentCondition,
+	)
+
+	apimeta.SetStatusCondition(
+		&vllmService.Status.Conditions,
+		storageCondition,
+	)
+
+	apimeta.SetStatusCondition(
+		&vllmService.Status.Conditions,
+		routeCondition,
+	)
+
+	apimeta.SetStatusCondition(
+		&vllmService.Status.Conditions,
+		overallAvailableCondition,
+	)
+
+	if apiequality.Semantic.DeepEqual(
+		before.Status,
+		vllmService.Status,
+	) {
+		return storageErr
 	}
 
-	vllmservice.Status.Phase = phase
-	vllmservice.Status.ReadyReplicas = deployment.Status.ReadyReplicas
-	vllmservice.Status.DeploymentName = deployment.Name
-	vllmservice.Status.ServiceName = serviceName
-	vllmservice.Status.GatewayRefName = gatewayRefName
-	vllmservice.Status.GatewayRefNamespace = gatewayRefNamespace
-	vllmservice.Status.HTTPRouteName = httpRouteName
-	vllmservice.Status.Message = message
+	if err := r.Status().Patch(
+		ctx,
+		vllmService,
+		client.MergeFrom(before),
+	); err != nil {
+		return err
+	}
 
-	return r.Status().Update(ctx, vllmservice)
+	return storageErr
 }
 
 func phaseAndMessageFromDeployment(deployment *appsv1.Deployment) (string, string) {
@@ -559,9 +1063,10 @@ func phaseAndMessageFromDeployment(deployment *appsv1.Deployment) (string, strin
 	}
 
 	for _, condition := range deployment.Status.Conditions {
-		if condition.Type == appsv1.DeploymentReplicaFailure && condition.Status == corev1.ConditionTrue {
+		if condition.Type == appsv1.DeploymentReplicaFailure &&
+			condition.Status == corev1.ConditionTrue {
 			return "failed", fmt.Sprintf(
-				"Deployment %s 副本创建失败： %s",
+				"Deployment %s 副本创建失败：%s",
 				deployment.Name,
 				condition.Message,
 			)
@@ -570,7 +1075,7 @@ func phaseAndMessageFromDeployment(deployment *appsv1.Deployment) (string, strin
 
 	if desiredReplicas > 0 && deployment.Status.ReadyReplicas >= desiredReplicas {
 		return "Running", fmt.Sprintf(
-			"Deployment %s 已就绪： readyReplicas = %d/%d",
+			"Deployment %s 已就绪：readyReplicas=%d/%d",
 			deployment.Name,
 			deployment.Status.ReadyReplicas,
 			desiredReplicas,
@@ -578,12 +1083,11 @@ func phaseAndMessageFromDeployment(deployment *appsv1.Deployment) (string, strin
 	}
 
 	return "Pending", fmt.Sprintf(
-		"Deployment %s 正在启动： readyReplicas = %d/%d",
+		"Deployment %s 正在启动：readyReplicas=%d/%d",
 		deployment.Name,
 		deployment.Status.ReadyReplicas,
 		desiredReplicas,
 	)
-
 }
 
 func replicasFor(vllmService *aiinfrav1alpha1.VLLMService) *int32 {
@@ -594,17 +1098,14 @@ func replicasFor(vllmService *aiinfrav1alpha1.VLLMService) *int32 {
 	return &replicas
 }
 
-func portFor(vllmservice *aiinfrav1alpha1.VLLMService) int32 {
-	if vllmservice.Spec.Port == 0 {
+func portFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
+	if vllmService.Spec.Port == 0 {
 		return 8000
 	}
 
-	return vllmservice.Spec.Port
+	return vllmService.Spec.Port
 }
 
-/*
-selectorLabelsForVLLMService 生成稳定选择标签，用于 Deployment selector 和 Service selector。
-*/
 func selectorLabelsForVLLMService(name string) map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":     "vllmservice",
@@ -612,11 +1113,7 @@ func selectorLabelsForVLLMService(name string) map[string]string {
 	}
 }
 
-/*
-labelsForVLLMService 生成完整对象标签，用于 deployment的metadata.labels 和 PodTemplate labels。以及service的metadata.labels
-*/
 func labelsForVLLMService(vllmService *aiinfrav1alpha1.VLLMService) map[string]string {
-
 	labels := make(map[string]string)
 
 	for key, value := range vllmService.Spec.Labels {
@@ -628,7 +1125,6 @@ func labelsForVLLMService(vllmService *aiinfrav1alpha1.VLLMService) map[string]s
 	labels["app.kubernetes.io/managed-by"] = "vllmservice-operator"
 
 	return labels
-
 }
 
 func int32Ptr(v int32) *int32 {
