@@ -26,6 +26,7 @@ const (
 	VLLMServiceConditionDeploymentReady = "DeploymentReady"
 	VLLMServiceConditionStorageReady    = "StorageReady"
 	VLLMServiceConditionRouteReady      = "RouteReady"
+	VLLMServiceConditionMonitoringReady = "MonitoringReady"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -75,6 +76,35 @@ type VLLMServiceGatewayRef struct {
 	Host string `json:"host"`
 }
 
+type VLLMServiceMonitoringSpec struct {
+	// Enabled 表示是否创建serviceMonitor
+
+	// 未填写、false或monitoring为空对象时，都不会启用监控
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Path 表示vllm暴露Prometheus指标的HTTP路径
+	// enabled=true且未填写时，Controller默认使用 /metrics
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern:="^/.*"
+	Path string `json:"path,omitempty"`
+
+	// Interval表示Prometheus住区指标的时间间隔
+	// enabled=true 且未填写时，Controller默认使用30s
+	// 支持30s、1m、1h30m 登Prometheus duration格式
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern:="^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+	Interval string `json:"interval,omitempty"`
+
+	// Labels 会添加到ServiceMonitor.metadata.labels
+	//当Prometheus.spec.serviceMonitorSelector 要求特定标签时，
+	//可以通过该字段添加， 例如 release: prometheus
+	// +OPTIONAL
+	Labels map[string]string `json:"labels,omitempty"`
+}
+
 // VLLMServiceSpec defines the desired state of VLLMService
 type VLLMServiceSpec struct {
 
@@ -116,6 +146,11 @@ type VLLMServiceSpec struct {
 	//GatewayRef 表示当前VLLMService要挂载到哪个Gateway上。 不填写gatewayRef时，operator只创建Deployment和service，不创建HTTPRoute
 	// +optional
 	GatewayRef *VLLMServiceGatewayRef `json:"gatewayRef,omitempty"`
+
+	// Monitoring 表示当前VLLMService的Prometheus指标抓取配置
+	// 只有monitoring.enabled=true时，operator才创建ServiceMonitor,
+	// +optional
+	Monitoring *VLLMServiceMonitoringSpec `json:"monitoring,omitempty"`
 
 	// +kubebuilder:validation:Required
 	Resources corev1.ResourceRequirements `json:"resources"`
@@ -163,6 +198,10 @@ type VLLMServiceStatus struct {
 
 	// +optional
 	ServiceName string `json:"serviceName,omitempty"`
+
+	// ServiceMonitorName 表示Operator为当前VLLMService创建的serviceMonitor名称
+	// +optional
+	ServiceMonitorName string `json:"serviceMonitorName,omitempty"`
 
 	// GatewayRefName 表示当前VLLMService引用的Gateway名称。 注意： 这不是operator创建的Gateway，而是引用
 	// +optional

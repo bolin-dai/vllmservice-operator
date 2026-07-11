@@ -23,6 +23,7 @@ import (
 	"time"
 
 	aiinfrav1alpha1 "github.com/bolin-dai/vllmservice-operator/api/v1alpha1"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
@@ -52,6 +53,7 @@ type VLLMServiceReconciler struct {
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;create;update;patch;delete
 func (r *VLLMServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -138,6 +140,20 @@ func (r *VLLMServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		"name", service.Name,
 	)
 
+	/*
+		同步ServiceMonitor, 这里不立即返回monitoringErr
+		而是先继续计算并更新MonitoringReady Condition.
+		这样用户可以从status.conditions中看到失败原因。
+	*/
+	serviceMonitor, monitoringMessage, monitoringErr := r.reconcileServiceMonitor(ctx, vllmService, service)
+
+	if monitoringErr != nil {
+		logger.Error(
+			monitoringErr,
+			"同步ServiceMonitor失败",
+		)
+	}
+
 	httpRoute, routeMessage, requeueAfter, err := r.reconcileHTTPRoute(ctx, vllmService, service)
 	if err != nil {
 		logger.Error(err, "同步 HTTPRoute 失败")
@@ -150,10 +166,16 @@ func (r *VLLMServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		deployment,
 		service,
 		httpRoute,
+		serviceMonitor,
 		routeMessage,
+		monitoringMessage,
 	); err != nil {
 		logger.Error(err, "更新 VLLMService status 失败")
 		return ctrl.Result{}, err
+	}
+
+	if monitoringErr != nil {
+		return ctrl.Result{}, monitoringErr
 	}
 
 	if !apimeta.IsStatusConditionTrue(
@@ -265,6 +287,222 @@ func (r *VLLMServiceReconciler) reconcileHTTPRoute(
 	)
 
 	return httpRoute, "", 0, nil
+}
+
+func monitoringEnabled(
+	vllmService *aiinfrav1alpha1.VLLMService,
+) bool {
+	return vllmService.Spec.Monitoring != nil &&
+		vllmService.Spec.Monitoring.Enabled
+}
+
+func monitoringPathFor(
+	vllmService *aiinfrav1alpha1.VLLMService,
+) string {
+	if vllmService.Spec.Monitoring == nil ||
+		vllmService.Spec.Monitoring.Path == "" {
+		return "/metrics"
+	}
+
+	return vllmService.Spec.Monitoring.Path
+
+}
+
+func monitoringIntervalFor(
+	vllmService *aiinfrav1alpha1.VLLMService,
+) string {
+	if vllmService.Spec.Monitoring == nil ||
+		vllmService.Spec.Monitoring.Interval == "" {
+		return "30s"
+	}
+
+	return vllmService.Spec.Monitoring.Interval
+}
+
+func serviceMonitorLabelsForVLLMService(
+	vllmService *aiinfrav1alpha1.VLLMService,
+) map[string]string {
+	labels := make(map[string]string)
+
+	if vllmService.Spec.Monitoring != nil {
+		for key, value := range vllmService.Spec.Monitoring.Labels {
+			labels[key] = value
+		}
+	}
+
+	labels["app.kubernetes.io/name"] = "vllmservice"
+	labels["app.kubernetes.io/instance"] = vllmService.Name
+	labels["app.kubernetes.io/managed-by"] = "vllmservice-operator"
+
+	return labels
+}
+
+func (r *VLLMServiceReconciler) reconcileServiceMonitor(
+	ctx context.Context,
+	vllmService *aiinfrav1alpha1.VLLMService,
+	service *corev1.Service,
+) (*monitoringv1.ServiceMonitor, string, error) {
+	logger := log.FromContext(ctx)
+
+	/*
+		只有monitoring.enabled=true 时才需要ServiceMonitor,
+		如果用户把enabled从true改成false，或者直接删除monitoring配置，
+		operator会删除之前由自己创建的ServiceMOnitor
+	*/
+	if !monitoringEnabled(vllmService) {
+		if err := r.deleteOwnedServiceMonitorIfExists(
+			ctx,
+			vllmService,
+		); err != nil {
+			message := fmt.Sprintf(
+				"删除不再需要的ServiceMonitor失败 %v",
+				err,
+			)
+			return nil, message, err
+		}
+		return nil, "", nil
+	}
+
+	serviceMonitor := &monitoringv1.ServiceMonitor{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      vllmService.Name,
+			Namespace: vllmService.Namespace,
+		},
+	}
+
+	operation, err := controllerutil.CreateOrUpdate(
+		ctx,
+		r.Client,
+		serviceMonitor,
+		func() error {
+			/*
+				如果已经存在一个同名ServiceMonitor， 但不是当前VLLMService管理的资源，则禁止直接接管或覆盖它。
+			*/
+			if serviceMonitor.ResourceVersion != "" &&
+				!metav1.IsControlledBy(serviceMonitor, vllmService) {
+				return fmt.Errorf(
+					"同名ServiceMonitor %s/%s 已存在，但不属于当前VLLMService",
+					serviceMonitor.Namespace,
+					serviceMonitor.Name,
+				)
+			}
+
+			serviceMonitor.Labels = serviceMonitorLabelsForVLLMService(vllmService)
+
+			serviceMonitor.Spec = monitoringv1.ServiceMonitorSpec{
+				/*
+					这里选择的是Service.metadata.Labels
+				*/
+				Selector: metav1.LabelSelector{
+					MatchLabels: selectorLabelsForVLLMService(
+						vllmService.Name,
+					),
+				},
+
+				/*
+					ServiceMonitor与service位于同一个命名空间
+
+				*/
+				NamespaceSelector: monitoringv1.NamespaceSelector{
+					MatchNames: []string{
+						service.Namespace,
+					},
+				},
+
+				Endpoints: []monitoringv1.Endpoint{
+					{
+						/*
+							Port填写的是Service port名称，不是数字端口8000
+						*/
+						Port: "http",
+
+						Path: monitoringPathFor(vllmService),
+
+						Scheme: "http",
+
+						Interval: monitoringv1.Duration(
+							monitoringIntervalFor(vllmService),
+						),
+					},
+				},
+			}
+
+			return controllerutil.SetControllerReference(
+				vllmService,
+				serviceMonitor,
+				r.Scheme,
+			)
+
+		},
+	)
+
+	if err != nil {
+		message := fmt.Sprintf(
+			"创建或更新 ServiceMonitor %s/%s 失败： %v",
+			vllmService.Namespace,
+			vllmService.Name,
+			err,
+		)
+		return nil, message, err
+	}
+
+	logger.Info(
+		"ServiceMonitor 同步完成",
+		"operation", operation,
+		"namespace", serviceMonitor.Namespace,
+		"name", serviceMonitor.Name,
+	)
+
+	return serviceMonitor, "", nil
+
+}
+
+func (r *VLLMServiceReconciler) deleteOwnedServiceMonitorIfExists(
+	ctx context.Context,
+	vllmService *aiinfrav1alpha1.VLLMService,
+) error {
+	logger := log.FromContext(ctx)
+
+	serviceMonitor := &monitoringv1.ServiceMonitor{}
+
+	err := r.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      vllmService.Name,
+			Namespace: vllmService.Namespace,
+		},
+		serviceMonitor,
+	)
+
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if !metav1.IsControlledBy(serviceMonitor, vllmService) {
+		logger.Info(
+			"发现同名 ServiceMonitor, 但它不是当前VLLMService控制的资源,跳过删除",
+			"namespace", serviceMonitor.Namespace,
+			"name", serviceMonitor.Name,
+		)
+		return nil
+	}
+
+	if err := r.Delete(ctx, serviceMonitor); err != nil {
+		return err
+	}
+
+	logger.Info(
+		"ServiceMonitor 已删除",
+		"namespace", serviceMonitor.Namespace,
+		"name", serviceMonitor.Name,
+	)
+
+	return nil
+
 }
 
 func (r *VLLMServiceReconciler) resolveGatewayRef(
@@ -887,16 +1125,76 @@ func routeReadyCondition(
 	)
 }
 
+func monitoringReadyCondition(
+	vllmService *aiinfrav1alpha1.VLLMService,
+	serviceMonitor *monitoringv1.ServiceMonitor,
+	monitoringMessage string,
+) metav1.Condition {
+	/*
+		优先判断Reconcile是否发生错误，
+		即使当前monitoring已关闭，也可能出现删除旧ServiceMonitor失败的情况
+	*/
+	if monitoringMessage != "" {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionMonitoringReady,
+			metav1.ConditionFalse,
+			"ServiceMonitorReconcileFailed",
+			monitoringMessage,
+		)
+	}
+
+	/*
+		monitoring.enabled未显式设置为true时， 不创建vllmService
+	*/
+	if !monitoringEnabled(vllmService) {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionMonitoringReady,
+			metav1.ConditionTrue,
+			"MonitoringDisabled",
+			"monitoring.enabled未设置为true,不需要创建serviceMonitor",
+		)
+	}
+
+	if serviceMonitor == nil {
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionMonitoringReady,
+			metav1.ConditionUnknown,
+			"ServiceMonitoringPending",
+			"监控已启用,但ServiceMonitor尚未创建或尚未获取到。",
+		)
+	}
+
+	return newVLLMServiceCondition(
+		vllmService,
+		aiinfrav1alpha1.VLLMServiceConditionMonitoringReady,
+		metav1.ConditionTrue,
+		"ServiceMonitorConfigured",
+		fmt.Sprintf(
+			"ServiceMonitor %s/%s 已配置,port=http,path=%s,interval=%s",
+			serviceMonitor.Namespace,
+			serviceMonitor.Name,
+			monitoringPathFor(vllmService),
+			monitoringIntervalFor(vllmService),
+		),
+	)
+
+}
+
 func availableCondition(
 	vllmService *aiinfrav1alpha1.VLLMService,
 	deploymentCondition metav1.Condition,
 	storageCondition metav1.Condition,
 	routeCondition metav1.Condition,
+	monitoringCondition metav1.Condition,
 ) metav1.Condition {
 	componentConditions := []metav1.Condition{
 		deploymentCondition,
 		storageCondition,
 		routeCondition,
+		monitoringCondition,
 	}
 
 	var falseConditions []string
@@ -943,7 +1241,7 @@ func availableCondition(
 		aiinfrav1alpha1.VLLMServiceConditionAvailable,
 		metav1.ConditionTrue,
 		"AllComponentsReady",
-		"Deployment、Storage 和 Route 均已就绪",
+		"Deployment、Storage、Route 和 Monitoring 均已就绪",
 	)
 }
 
@@ -953,7 +1251,9 @@ func (r *VLLMServiceReconciler) updateVLLMServiceStatus(
 	deployment *appsv1.Deployment,
 	service *corev1.Service,
 	httpRoute *gatewayv1.HTTPRoute,
+	serviceMonitor *monitoringv1.ServiceMonitor,
 	routeMessage string,
+	monitoringMessage string,
 ) error {
 	before := vllmService.DeepCopy()
 
@@ -970,6 +1270,11 @@ func (r *VLLMServiceReconciler) updateVLLMServiceStatus(
 	serviceName := ""
 	if service != nil {
 		serviceName = service.Name
+	}
+
+	serviceMonitorName := ""
+	if serviceMonitor != nil {
+		serviceMonitorName = serviceMonitor.Name
 	}
 
 	gatewayRefName := ""
@@ -1001,11 +1306,18 @@ func (r *VLLMServiceReconciler) updateVLLMServiceStatus(
 		routeMessage,
 	)
 
+	monitoringCondition := monitoringReadyCondition(
+		vllmService,
+		serviceMonitor,
+		monitoringMessage,
+	)
+
 	overallAvailableCondition := availableCondition(
 		vllmService,
 		deploymentCondition,
 		storageCondition,
 		routeCondition,
+		monitoringCondition,
 	)
 
 	vllmService.Status.ObservedGeneration = vllmService.Generation
@@ -1013,6 +1325,7 @@ func (r *VLLMServiceReconciler) updateVLLMServiceStatus(
 	vllmService.Status.ReadyReplicas = deployment.Status.ReadyReplicas
 	vllmService.Status.DeploymentName = deployment.Name
 	vllmService.Status.ServiceName = serviceName
+	vllmService.Status.ServiceMonitorName = serviceMonitorName
 	vllmService.Status.GatewayRefName = gatewayRefName
 	vllmService.Status.GatewayRefNamespace = gatewayRefNamespace
 	vllmService.Status.HTTPRouteName = httpRouteName
@@ -1031,6 +1344,11 @@ func (r *VLLMServiceReconciler) updateVLLMServiceStatus(
 	apimeta.SetStatusCondition(
 		&vllmService.Status.Conditions,
 		routeCondition,
+	)
+
+	apimeta.SetStatusCondition(
+		&vllmService.Status.Conditions,
+		monitoringCondition,
 	)
 
 	apimeta.SetStatusCondition(
@@ -1154,6 +1472,7 @@ func (r *VLLMServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&gatewayv1.HTTPRoute{}).
+		Owns(&monitoringv1.ServiceMonitor{}).
 		Named("vllmservice").
 		Complete(r)
 }
