@@ -76,6 +76,38 @@ spec:
               modelPath:
                 minLength: 1
                 type: string
+              monitoring:
+                description: |-
+                  Monitoring 表示当前VLLMService的Prometheus指标抓取配置
+                  只有monitoring.enabled=true时，operator才创建ServiceMonitor,
+                properties:
+                  enabled:
+                    description: 未填写、false或monitoring为空对象时，都不会启用监控
+                    type: boolean
+                  interval:
+                    description: |-
+                      Interval表示Prometheus住区指标的时间间隔
+                      enabled=true 且未填写时，Controller默认使用30s
+                      支持30s、1m、1h30m 登Prometheus duration格式
+                    minLength: 1
+                    pattern: ^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$
+                    type: string
+                  labels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Labels 会添加到ServiceMonitor.metadata.labels
+                      当Prometheus.spec.serviceMonitorSelector 要求特定标签时，
+                      可以通过该字段添加， 例如 release: prometheus
+                    type: object
+                  path:
+                    description: |-
+                      Path 表示vllm暴露Prometheus指标的HTTP路径
+                      enabled=true且未填写时，Controller默认使用 /metrics
+                    minLength: 1
+                    pattern: ^/.*
+                    type: string
+                type: object
               nodeSelector:
                 additionalProperties:
                   type: string
@@ -268,6 +300,9 @@ spec:
               readyReplicas:
                 format: int32
                 type: integer
+              serviceMonitorName:
+                description: ServiceMonitorName 表示Operator为当前VLLMService创建的serviceMonitor名称
+                type: string
               serviceName:
                 type: string
             type: object
