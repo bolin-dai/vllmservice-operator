@@ -29,6 +29,32 @@ const (
 	VLLMServiceConditionMonitoringReady = "MonitoringReady"
 )
 
+type VLLMServiceEngineArgsSpec struct {
+	// Dtype表示vllm加载模型权重和激活值时使用的数据类型。不填写时默认使用auto
+	// +optional
+	// +kubebuiler:validation:Enum=auto;half;float16;bfloat16;float;float32
+	// +kubebuilder:default:=auto
+	Dtype string `json:"dtype,omitempty"`
+
+	// MaxModelLen 表示模型最大上下文长度，也就是输入token+输出token的总长度上限。不填写时默认使用4096
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default:=4096
+	MaxModelLen *int32 `json:"maxModelLen,omitempty"`
+
+	// GpuMemoryUtilization 表示当前vllm实例最多使用多少比例的GPU显存
+	// 例如：0.75表示最多使用约75%的显存，不填写时默认使用0.75
+	// +optional
+	// +kubebuilder:validation:Pattern=`^(0(\.[0-9]+)?|1(\.0+)?)$`
+	GPUMemoryUtilization string `json:"gpuMemoryUtilization,omitempty"`
+
+	// MaxNumSeqs 表示vllm 一次调度迭代中最多处理多少个请求序列。可以粗略理解为推理batch size上限之一。 不填写时默认使用8
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default:=8
+	MaxNumSeqs *int32 `json:"maxNumSeqs,omitempty"`
+}
+
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 type VLLMServiceStorageSpec struct {
@@ -151,6 +177,10 @@ type VLLMServiceSpec struct {
 	// 只有monitoring.enabled=true时，operator才创建ServiceMonitor,
 	// +optional
 	Monitoring *VLLMServiceMonitoringSpec `json:"monitoring,omitempty"`
+
+	// EngineArgs表示vllm引擎启动参数。不填写时，operator会使用一组适合小显存实验环境的默认值
+	// +optional
+	EngineArgs *VLLMServiceEngineArgsSpec `json:"engineArgs,omitempty"`
 
 	// +kubebuilder:validation:Required
 	Resources corev1.ResourceRequirements `json:"resources"`

@@ -670,10 +670,10 @@ func buildVLLMContainer(vllmService *aiinfrav1alpha1.VLLMService) corev1.Contain
 			"--served-model-name", vllmService.Spec.ModelName,
 			"--host", "0.0.0.0",
 			"--port", fmt.Sprintf("%d", port),
-			"--dtype", "auto",
-			"--max-model-len", "4096",
-			"--gpu-memory-utilization", "0.75",
-			"--max-num-seqs", "8",
+			"--dtype", dtypeFor(vllmService),
+			"--max-model-len", fmt.Sprintf("%d", maxModelLenFor(vllmService)),
+			"--gpu-memory-utilization", gpuMemoryUtilizationFor(vllmService),
+			"--max-num-seqs", fmt.Sprintf("%d", maxNumSeqsFor(vllmService)),
 		},
 		Ports: []corev1.ContainerPort{
 			{
@@ -684,6 +684,34 @@ func buildVLLMContainer(vllmService *aiinfrav1alpha1.VLLMService) corev1.Contain
 		},
 		Resources: vllmService.Spec.Resources,
 	}
+}
+
+func dtypeFor(vllmService *aiinfrav1alpha1.VLLMService) string {
+	if vllmService.Spec.EngineArgs == nil || vllmService.Spec.EngineArgs.Dtype == "" {
+		return "auto"
+	}
+	return vllmService.Spec.EngineArgs.Dtype
+}
+
+func maxModelLenFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
+	if vllmService.Spec.EngineArgs == nil || vllmService.Spec.EngineArgs.MaxModelLen == nil {
+		return 4096
+	}
+	return *vllmService.Spec.EngineArgs.MaxModelLen
+}
+
+func gpuMemoryUtilizationFor(vllmService *aiinfrav1alpha1.VLLMService) string {
+	if vllmService.Spec.EngineArgs == nil || vllmService.Spec.EngineArgs.GPUMemoryUtilization == "" {
+		return "0.75"
+	}
+	return vllmService.Spec.EngineArgs.GPUMemoryUtilization
+}
+
+func maxNumSeqsFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
+	if vllmService.Spec.EngineArgs == nil || vllmService.Spec.EngineArgs.MaxNumSeqs == nil {
+		return 8
+	}
+	return *vllmService.Spec.EngineArgs.MaxNumSeqs
 }
 
 func buildModelVolumesAndMounts(vllmService *aiinfrav1alpha1.VLLMService) ([]corev1.Volume, []corev1.VolumeMount) {
