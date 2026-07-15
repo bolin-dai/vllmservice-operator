@@ -210,6 +210,32 @@ type VLLMServiceLivenessProbeSpec struct {
 	FailureThreshold *int32 `json:"failureThreshold,omitempty"`
 }
 
+type VLLMServiceReadinessProbeSpec struct {
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern:="^/.*"
+	Path string `json:"path,omitempty"`
+
+	// +optional
+	// +kubebuilder:calidation:Minimum=0
+	InitialDelaySeconds *int32 `json:"initialDelaySeconds,omitempty"`
+
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	PeriodSeconds *int32 `json:"periodSeconds,omitempty"`
+
+	// +optional
+	// +kubebuilder:calidation:Minimum=1
+	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty"`
+
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	FailureThreshold *int32 `json:"failureThreshold,omitempty"`
+}
+
 // VLLMServiceSpec defines the desired state of VLLMService
 type VLLMServiceSpec struct {
 
@@ -238,6 +264,12 @@ type VLLMServiceSpec struct {
 
 	// +optional
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	// HostIPC 表示是否让 Pod 使用宿主机的 IPC namespace。
+	// 默认不启用。只有用户明确设置 hostIPC=true 时，operator 才会开启。
+	// 一般单卡 vLLM 推理不需要开启；只有在明确需要共享宿主机 IPC 资源时才建议开启。
+	// +optional
+	HostIPC bool `json:"hostIPC,omitempty"`
 
 	// +optional
 	Labels map[string]string `json:"labels,omitempty"`
@@ -268,6 +300,9 @@ type VLLMServiceSpec struct {
 
 	// +optional
 	LivenessProbe *VLLMServiceLivenessProbeSpec `json:"livenessProbe,omitempty"`
+
+	// +optional
+	ReadinessProbe *VLLMServiceReadinessProbeSpec `json:"readinessProbe,omitempty"`
 
 	// +kubebuilder:validation:Required
 	Resources corev1.ResourceRequirements `json:"resources"`

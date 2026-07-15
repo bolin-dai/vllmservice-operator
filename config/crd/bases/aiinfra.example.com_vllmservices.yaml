@@ -97,6 +97,12 @@ spec:
                 - name
                 - sectionName
                 type: object
+              hostIPC:
+                description: |-
+                  HostIPC 表示是否让 Pod 使用宿主机的 IPC namespace。
+                  默认不启用。只有用户明确设置 hostIPC=true 时，operator 才会开启。
+                  一般单卡 vLLM 推理不需要开启；只有在明确需要共享宿主机 IPC 资源时才建议开启。
+                type: boolean
               image:
                 minLength: 1
                 type: string
@@ -198,6 +204,29 @@ spec:
                 maximum: 65535
                 minimum: 1
                 type: integer
+              readinessProbe:
+                properties:
+                  enabled:
+                    type: boolean
+                  failureThreshold:
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  initialDelaySeconds:
+                    format: int32
+                    type: integer
+                  path:
+                    minLength: 1
+                    pattern: ^/.*
+                    type: string
+                  periodSeconds:
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  timeoutSeconds:
+                    format: int32
+                    type: integer
+                type: object
               replicas:
                 default: 1
                 format: int32
@@ -288,7 +317,7 @@ spec:
                       InitialDelaySeconds 表示容器启动后，延迟多少秒才开始执行startupProbe
                       enabled=true且未填写时，Controller默认使用30秒
                     format: int32
-                    minimum: 1
+                    minimum: 0
                     type: integer
                   path:
                     description: |-

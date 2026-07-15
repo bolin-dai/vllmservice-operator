@@ -639,7 +639,7 @@ func buildPodTemplate(vllmService *aiinfrav1alpha1.VLLMService) corev1.PodTempla
 		SchedulerName:                 schedulerName,
 		TerminationGracePeriodSeconds: int64Ptr(30),
 		EnableServiceLinks:            boolPtr(true),
-		HostIPC:                       true,
+		HostIPC:                       vllmService.Spec.HostIPC,
 	}
 
 	if vllmService.Spec.RuntimeClassName != "" {
@@ -690,6 +690,9 @@ func buildVLLMContainer(vllmService *aiinfrav1alpha1.VLLMService) corev1.Contain
 	}
 	if livenessProbeEnabled(vllmService) {
 		container.LivenessProbe = buildVLLMLivenessProbe(vllmService)
+	}
+	if readinessProbeEnabled(vllmService) {
+		container.ReadinessProbe = buildVLLMReadinessProbe(vllmService)
 	}
 
 	return container
@@ -831,6 +834,60 @@ func maxNumSeqsFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
 		return 8
 	}
 	return *vllmService.Spec.EngineArgs.MaxNumSeqs
+}
+
+func readinessProbeEnabled(vllmService *aiinfrav1alpha1.VLLMService) bool {
+	return vllmService.Spec.ReadinessProbe != nil && vllmService.Spec.ReadinessProbe.Enabled
+}
+
+func readinessProbePathFor(vllmService *aiinfrav1alpha1.VLLMService) string {
+	if vllmService.Spec.ReadinessProbe == nil || vllmService.Spec.ReadinessProbe.Path == "" {
+		return "/health"
+	}
+	return vllmService.Spec.ReadinessProbe.Path
+}
+
+func readinessProbeInitialDelaySecondesFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
+	if vllmService.Spec.ReadinessProbe == nil || vllmService.Spec.ReadinessProbe.InitialDelaySeconds == nil {
+		return 30
+	}
+	return *vllmService.Spec.ReadinessProbe.InitialDelaySeconds
+}
+
+func readinessProbePeriodSecondsFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
+	if vllmService.Spec.ReadinessProbe == nil || vllmService.Spec.ReadinessProbe.PeriodSeconds == nil {
+		return 30
+	}
+	return *vllmService.Spec.ReadinessProbe.PeriodSeconds
+}
+
+func readinessProbeTimeoutSecondsFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
+	if vllmService.Spec.ReadinessProbe == nil || vllmService.Spec.ReadinessProbe.TimeoutSeconds == nil {
+		return 5
+	}
+	return *vllmService.Spec.ReadinessProbe.TimeoutSeconds
+}
+
+func readinessProbeFailureThresholdFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
+	if vllmService.Spec.ReadinessProbe == nil || vllmService.Spec.ReadinessProbe.FailureThreshold == nil {
+		return 3
+	}
+	return *vllmService.Spec.ReadinessProbe.FailureThreshold
+}
+
+func buildVLLMReadinessProbe(vllmService *aiinfrav1alpha1.VLLMService) *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{
+				Path: readinessProbePathFor(vllmService),
+				Port: intstr.FromString("http"),
+			},
+		},
+		InitialDelaySeconds: readinessProbeInitialDelaySecondesFor(vllmService),
+		PeriodSeconds:       readinessProbePeriodSecondsFor(vllmService),
+		TimeoutSeconds:      readinessProbeTimeoutSecondsFor(vllmService),
+		FailureThreshold:    readinessProbeFailureThresholdFor(vllmService),
+	}
 }
 
 func buildModelVolumesAndMounts(vllmService *aiinfrav1alpha1.VLLMService) ([]corev1.Volume, []corev1.VolumeMount) {
