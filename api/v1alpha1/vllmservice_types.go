@@ -220,7 +220,7 @@ type VLLMServiceReadinessProbeSpec struct {
 	Path string `json:"path,omitempty"`
 
 	// +optional
-	// +kubebuilder:calidation:Minimum=0
+	// +kubebuilder:validation:Minimum=0
 	InitialDelaySeconds *int32 `json:"initialDelaySeconds,omitempty"`
 
 	// +optional
@@ -228,7 +228,7 @@ type VLLMServiceReadinessProbeSpec struct {
 	PeriodSeconds *int32 `json:"periodSeconds,omitempty"`
 
 	// +optional
-	// +kubebuilder:calidation:Minimum=1
+	// +kubebuilder:validation:Minimum=1
 	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty"`
 
 	// +optional

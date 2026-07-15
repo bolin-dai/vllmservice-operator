@@ -214,6 +214,7 @@ spec:
                     type: integer
                   initialDelaySeconds:
                     format: int32
+                    minimum: 0
                     type: integer
                   path:
                     minLength: 1
@@ -225,6 +226,7 @@ spec:
                     type: integer
                   timeoutSeconds:
                     format: int32
+                    minimum: 1
                     type: integer
                 type: object
               replicas:

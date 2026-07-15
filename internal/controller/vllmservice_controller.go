@@ -847,7 +847,7 @@ func readinessProbePathFor(vllmService *aiinfrav1alpha1.VLLMService) string {
 	return vllmService.Spec.ReadinessProbe.Path
 }
 
-func readinessProbeInitialDelaySecondesFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
+func readinessProbeInitialDelaySecondsFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
 	if vllmService.Spec.ReadinessProbe == nil || vllmService.Spec.ReadinessProbe.InitialDelaySeconds == nil {
 		return 30
 	}
@@ -883,7 +883,7 @@ func buildVLLMReadinessProbe(vllmService *aiinfrav1alpha1.VLLMService) *corev1.P
 				Port: intstr.FromString("http"),
 			},
 		},
-		InitialDelaySeconds: readinessProbeInitialDelaySecondesFor(vllmService),
+		InitialDelaySeconds: readinessProbeInitialDelaySecondsFor(vllmService),
 		PeriodSeconds:       readinessProbePeriodSecondsFor(vllmService),
 		TimeoutSeconds:      readinessProbeTimeoutSecondsFor(vllmService),
 		FailureThreshold:    readinessProbeFailureThresholdFor(vllmService),
