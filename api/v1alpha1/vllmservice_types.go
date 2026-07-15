@@ -147,7 +147,7 @@ type VLLMServiceStartupProbeSpec struct {
 	// InitialDelaySeconds 表示容器启动后，延迟多少秒才开始执行startupProbe
 	// enabled=true且未填写时，Controller默认使用30秒
 	// +optional
-	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Minimum=0
 	InitialDelaySeconds *int32 `json:"initialDelaySeconds,omitempty"`
 
 	// PeriodSeconds 表示每隔多少秒执行一次探测
