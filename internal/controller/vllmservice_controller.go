@@ -688,6 +688,9 @@ func buildVLLMContainer(vllmService *aiinfrav1alpha1.VLLMService) corev1.Contain
 	if startupProbeEnabled(vllmService) {
 		container.StartupProbe = buildVLLMStartupProbe(vllmService)
 	}
+	if livenessProbeEnabled(vllmService) {
+		container.LivenessProbe = buildVLLMLivenessProbe(vllmService)
+	}
 
 	return container
 
@@ -697,7 +700,7 @@ func startupProbeEnabled(vllmService *aiinfrav1alpha1.VLLMService) bool {
 	return vllmService.Spec.StartupProbe != nil && vllmService.Spec.StartupProbe.Enabled
 }
 
-func startProbePathFor(vllmService *aiinfrav1alpha1.VLLMService) string {
+func startupProbePathFor(vllmService *aiinfrav1alpha1.VLLMService) string {
 	if vllmService.Spec.StartupProbe == nil || vllmService.Spec.StartupProbe.Path == "" {
 		return "/health"
 	}
@@ -737,7 +740,7 @@ func buildVLLMStartupProbe(vllmService *aiinfrav1alpha1.VLLMService) *corev1.Pro
 	return &corev1.Probe{
 		ProbeHandler: corev1.ProbeHandler{
 			HTTPGet: &corev1.HTTPGetAction{
-				Path: startProbePathFor(vllmService),
+				Path: startupProbePathFor(vllmService),
 				Port: intstr.FromString("http"),
 			},
 		},
@@ -746,6 +749,60 @@ func buildVLLMStartupProbe(vllmService *aiinfrav1alpha1.VLLMService) *corev1.Pro
 		TimeoutSeconds:      startupProbeTimeoutSecondsFor(vllmService),
 		FailureThreshold:    startupProbeFailureThresholdFor(vllmService),
 	}
+}
+
+func buildVLLMLivenessProbe(vllmService *aiinfrav1alpha1.VLLMService) *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{
+				Path: livenessProbePathFor(vllmService),
+				Port: intstr.FromString("http"),
+			},
+		},
+		InitialDelaySeconds: livenessProbeInitialDelaySecondsFor(vllmService),
+		PeriodSeconds:       livenessProbePeriodSecondsFor(vllmService),
+		TimeoutSeconds:      livenessProbeTimeoutSecondsFor(vllmService),
+		FailureThreshold:    livenessProbeFailureThresholdFor(vllmService),
+	}
+}
+
+func livenessProbeEnabled(vllmService *aiinfrav1alpha1.VLLMService) bool {
+	return vllmService.Spec.LivenessProbe != nil && vllmService.Spec.LivenessProbe.Enabled
+}
+
+func livenessProbePathFor(vllmService *aiinfrav1alpha1.VLLMService) string {
+	if vllmService.Spec.LivenessProbe == nil || vllmService.Spec.LivenessProbe.Path == "" {
+		return "/health"
+	}
+	return vllmService.Spec.LivenessProbe.Path
+}
+
+func livenessProbeInitialDelaySecondsFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
+	if vllmService.Spec.LivenessProbe == nil || vllmService.Spec.LivenessProbe.InitialDelaySeconds == nil {
+		return 30
+	}
+	return *vllmService.Spec.LivenessProbe.InitialDelaySeconds
+}
+
+func livenessProbePeriodSecondsFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
+	if vllmService.Spec.LivenessProbe == nil || vllmService.Spec.LivenessProbe.PeriodSeconds == nil {
+		return 30
+	}
+	return *vllmService.Spec.LivenessProbe.PeriodSeconds
+}
+
+func livenessProbeTimeoutSecondsFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
+	if vllmService.Spec.LivenessProbe == nil || vllmService.Spec.LivenessProbe.TimeoutSeconds == nil {
+		return 5
+	}
+	return *vllmService.Spec.LivenessProbe.TimeoutSeconds
+}
+
+func livenessProbeFailureThresholdFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
+	if vllmService.Spec.LivenessProbe == nil || vllmService.Spec.LivenessProbe.FailureThreshold == nil {
+		return 3
+	}
+	return *vllmService.Spec.LivenessProbe.FailureThreshold
 }
 
 func dtypeFor(vllmService *aiinfrav1alpha1.VLLMService) string {

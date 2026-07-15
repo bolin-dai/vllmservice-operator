@@ -165,7 +165,48 @@ type VLLMServiceStartupProbeSpec struct {
 	// FailureThreshold 表示连续失败多少次后认为启动失败
 	// enabled=true 且未填写时，Controller默认使用60次
 	// +optional
-	// kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Minimum=1
+	FailureThreshold *int32 `json:"failureThreshold,omitempty"`
+}
+
+type VLLMServiceLivenessProbeSpec struct {
+	// Enabled 表示是否启用livenessProbe。
+	// 只有enabled=true时，operator才会给vllm容器添加livenessProbe
+	// 不填写，flase或者livenessProbe为空对象时，都不会启用livenessProbe
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Path 表示livenessProbe访问的HTTP路径
+	// enabled=true且未填写时，controller默认使用/health
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern:="^/.*"
+	Path string `json:"path,omitempty"`
+
+	// InitialDelaySeconds 表示容器启动后，延迟多少秒才开始执行livenessProbe
+	//  enabled=true 且未填写时，Controller默认使用30秒。
+	// 如果同时启用了startupProbe, livenessProbe会等startupProbe成功后才真正生效
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	InitialDelaySeconds *int32 `json:"initialDelaySeconds,omitempty"`
+
+	// PeriodSeconds 表示每隔多少秒执行一次探测
+	// enabled=true 且未填写时，Controller默认使用30秒
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	PeriodSeconds *int32 `json:"periodSeconds,omitempty"`
+
+	// TimeoutSeconds 表示每次探测最多等待多少秒
+	// enabled=true 且未填写时，Controller默认使用5秒
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty"`
+
+	// FailuerThreshold 表示连续失败多少次后认为容器不健康
+	// enabled=true且未填写时，Controller默认使用3次
+	// livenessProbe 失败达到该阈值后，kubelet会重启容器
+	// +optional
+	// +kubebuilder:validation:Minimum=1
 	FailureThreshold *int32 `json:"failureThreshold,omitempty"`
 }
 
@@ -224,6 +265,9 @@ type VLLMServiceSpec struct {
 	// 只有startupProbe。enabled=true时，operator才会给容器添加startupProbe
 	// +optional
 	StartupProbe *VLLMServiceStartupProbeSpec `json:"startupProbe,omitempty"`
+
+	// +optional
+	LivenessProbe *VLLMServiceLivenessProbeSpec `json:"livenessProbe,omitempty"`
 
 	// +kubebuilder:validation:Required
 	Resources corev1.ResourceRequirements `json:"resources"`
