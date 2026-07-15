@@ -32,7 +32,7 @@ const (
 type VLLMServiceEngineArgsSpec struct {
 	// Dtype表示vllm加载模型权重和激活值时使用的数据类型。不填写时默认使用auto
 	// +optional
-	// +kubebuiler:validation:Enum=auto;half;float16;bfloat16;float;float32
+	// +kubebuilder:validation:Enum=auto;half;float16;bfloat16;float;float32
 	// +kubebuilder:default:=auto
 	Dtype string `json:"dtype,omitempty"`
 
@@ -131,6 +131,44 @@ type VLLMServiceMonitoringSpec struct {
 	Labels map[string]string `json:"labels,omitempty"`
 }
 
+type VLLMServiceStartupProbeSpec struct {
+	// Enabled表示是否启用startupProbe。 只有enabled=true时，operator才会给vllm容器添加startupProbe
+	// 不填写、false或者startupProbe为空对象时，都不会启动startupProbe
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Path表示startupProbe访问的HTTP路径
+	// enabled=true且未填写时，Controller默认使用/health
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern:="^/.*"
+	Path string `json:"path,omitempty"`
+
+	// InitialDelaySeconds 表示容器启动后，延迟多少秒才开始执行startupProbe
+	// enabled=true且未填写时，Controller默认使用30秒
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	InitialDelaySeconds *int32 `json:"initialDelaySeconds,omitempty"`
+
+	// PeriodSeconds 表示每隔多少秒执行一次探测
+	// enabled=true且未填写时，controller默认使用10秒
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	PeriodSeconds *int32 `json:"periodSeconds,omitempty"`
+
+	// TimeoutSeconds表示每次探测最多等待多少秒。
+	// enabled=true 且未填写时，Controller默认使用5秒
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty"`
+
+	// FailureThreshold 表示连续失败多少次后认为启动失败
+	// enabled=true 且未填写时，Controller默认使用60次
+	// +optional
+	// kubebuilder:validation:Minimum=1
+	FailureThreshold *int32 `json:"failureThreshold,omitempty"`
+}
+
 // VLLMServiceSpec defines the desired state of VLLMService
 type VLLMServiceSpec struct {
 
@@ -181,6 +219,11 @@ type VLLMServiceSpec struct {
 	// EngineArgs表示vllm引擎启动参数。不填写时，operator会使用一组适合小显存实验环境的默认值
 	// +optional
 	EngineArgs *VLLMServiceEngineArgsSpec `json:"engineArgs,omitempty"`
+
+	// startupProbe表示VLLM容器的启动探针配置
+	// 只有startupProbe。enabled=true时，operator才会给容器添加startupProbe
+	// +optional
+	StartupProbe *VLLMServiceStartupProbeSpec `json:"startupProbe,omitempty"`
 
 	// +kubebuilder:validation:Required
 	Resources corev1.ResourceRequirements `json:"resources"`

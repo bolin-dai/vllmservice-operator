@@ -661,7 +661,7 @@ func buildPodTemplate(vllmService *aiinfrav1alpha1.VLLMService) corev1.PodTempla
 func buildVLLMContainer(vllmService *aiinfrav1alpha1.VLLMService) corev1.Container {
 	port := portFor(vllmService)
 
-	return corev1.Container{
+	container := corev1.Container{
 		Name:            "vllm",
 		Image:           vllmService.Spec.Image,
 		ImagePullPolicy: corev1.PullIfNotPresent,
@@ -683,6 +683,68 @@ func buildVLLMContainer(vllmService *aiinfrav1alpha1.VLLMService) corev1.Contain
 			},
 		},
 		Resources: vllmService.Spec.Resources,
+	}
+
+	if startupProbeEnabled(vllmService) {
+		container.StartupProbe = buildVLLMStartupProbe(vllmService)
+	}
+
+	return container
+
+}
+
+func startupProbeEnabled(vllmService *aiinfrav1alpha1.VLLMService) bool {
+	return vllmService.Spec.StartupProbe != nil && vllmService.Spec.StartupProbe.Enabled
+}
+
+func startProbePathFor(vllmService *aiinfrav1alpha1.VLLMService) string {
+	if vllmService.Spec.StartupProbe == nil || vllmService.Spec.StartupProbe.Path == "" {
+		return "/health"
+	}
+
+	return vllmService.Spec.StartupProbe.Path
+}
+
+func startupProbeInitialDelaySecondsFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
+	if vllmService.Spec.StartupProbe == nil || vllmService.Spec.StartupProbe.InitialDelaySeconds == nil {
+		return 30
+	}
+	return *vllmService.Spec.StartupProbe.InitialDelaySeconds
+}
+
+func startupProbePeriodSecondsFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
+	if vllmService.Spec.StartupProbe == nil || vllmService.Spec.StartupProbe.PeriodSeconds == nil {
+		return 10
+	}
+	return *vllmService.Spec.StartupProbe.PeriodSeconds
+}
+
+func startupProbeTimeoutSecondsFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
+	if vllmService.Spec.StartupProbe == nil || vllmService.Spec.StartupProbe.TimeoutSeconds == nil {
+		return 5
+	}
+	return *vllmService.Spec.StartupProbe.TimeoutSeconds
+}
+
+func startupProbeFailureThresholdFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
+	if vllmService.Spec.StartupProbe == nil || vllmService.Spec.StartupProbe.FailureThreshold == nil {
+		return 60
+	}
+	return *vllmService.Spec.StartupProbe.FailureThreshold
+}
+
+func buildVLLMStartupProbe(vllmService *aiinfrav1alpha1.VLLMService) *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{
+				Path: startProbePathFor(vllmService),
+				Port: intstr.FromString("http"),
+			},
+		},
+		InitialDelaySeconds: startupProbeInitialDelaySecondsFor(vllmService),
+		PeriodSeconds:       startupProbePeriodSecondsFor(vllmService),
+		TimeoutSeconds:      startupProbeTimeoutSecondsFor(vllmService),
+		FailureThreshold:    startupProbeFailureThresholdFor(vllmService),
 	}
 }
 
