@@ -32,6 +32,8 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	aiinfrav1alpha1 "github.com/bolin-dai/vllmservice-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
@@ -62,6 +64,11 @@ var _ = BeforeSuite(func() {
 	err = aiinfrav1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = monitoringv1.AddToScheme(scheme.Scheme)
+Expect(err).NotTo(HaveOccurred())
+
+err = gatewayv1.AddToScheme(scheme.Scheme)
+Expect(err).NotTo(HaveOccurred())
 	// +kubebuilder:scaffold:scheme
 
 	By("bootstrapping test environment")
