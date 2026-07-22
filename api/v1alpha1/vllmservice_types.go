@@ -328,7 +328,7 @@ type VLLMServiceStatus struct {
 	// - "Degraded": the resource failed to reach or maintain its desired state
 	//
 
-	//ObservedGeneration 表示当前status是根据哪一版 VLLMService spec计算出来的
+	// ObservedGeneration 表示当前status是根据哪一版 VLLMService spec计算出来的
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
