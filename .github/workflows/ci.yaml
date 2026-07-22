@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Show Go version
+        run: go version
+
+      - name: Format
+        run: make fmt
+
+      - name: Vet
+        run: make vet
+
+      - name: Generate code
+        run: make generate
+
+      - name: Generate manifests
+        run: make manifests
+
+      - name: Check generated files
+        run: git diff --exit-code
+
+      - name: Build
+        run: make build
+
+      - name: Test
+        run: make test
