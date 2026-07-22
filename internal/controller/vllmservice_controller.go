@@ -45,6 +45,8 @@ type VLLMServiceReconciler struct {
 	Scheme *runtime.Scheme
 }
 
+const defaultProbePath = "/health"
+
 // +kubebuilder:rbac:groups=aiinfra.example.com,resources=vllmservices,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=aiinfra.example.com,resources=vllmservices/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=aiinfra.example.com,resources=vllmservices/finalizers,verbs=update
@@ -705,7 +707,7 @@ func startupProbeEnabled(vllmService *aiinfrav1alpha1.VLLMService) bool {
 
 func startupProbePathFor(vllmService *aiinfrav1alpha1.VLLMService) string {
 	if vllmService.Spec.StartupProbe == nil || vllmService.Spec.StartupProbe.Path == "" {
-		return "/health"
+		return defaultProbePath
 	}
 
 	return vllmService.Spec.StartupProbe.Path
@@ -775,7 +777,7 @@ func livenessProbeEnabled(vllmService *aiinfrav1alpha1.VLLMService) bool {
 
 func livenessProbePathFor(vllmService *aiinfrav1alpha1.VLLMService) string {
 	if vllmService.Spec.LivenessProbe == nil || vllmService.Spec.LivenessProbe.Path == "" {
-		return "/health"
+		return defaultProbePath
 	}
 	return vllmService.Spec.LivenessProbe.Path
 }
@@ -842,7 +844,7 @@ func readinessProbeEnabled(vllmService *aiinfrav1alpha1.VLLMService) bool {
 
 func readinessProbePathFor(vllmService *aiinfrav1alpha1.VLLMService) string {
 	if vllmService.Spec.ReadinessProbe == nil || vllmService.Spec.ReadinessProbe.Path == "" {
-		return "/health"
+		return defaultProbePath
 	}
 	return vllmService.Spec.ReadinessProbe.Path
 }

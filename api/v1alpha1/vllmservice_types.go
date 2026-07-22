@@ -86,7 +86,7 @@ type VLLMServiceGatewayRef struct {
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
-	//Namespace是Gateway所在命名空间。如果不填写，默认认为Gateway和当前VLLMService在同一个命名空间。
+	// Namespace是Gateway所在命名空间。如果不填写，默认认为Gateway和当前VLLMService在同一个命名空间。
 	// +optional
 	// +kubebuilder:validation:MinLength=1
 	Namespace string `json:"namespace,omitempty"`
@@ -125,9 +125,9 @@ type VLLMServiceMonitoringSpec struct {
 	Interval string `json:"interval,omitempty"`
 
 	// Labels 会添加到ServiceMonitor.metadata.labels
-	//当Prometheus.spec.serviceMonitorSelector 要求特定标签时，
-	//可以通过该字段添加， 例如 release: prometheus
-	// +OPTIONAL
+	// 当Prometheus.spec.serviceMonitorSelector 要求特定标签时，
+	// 可以通过该字段添加， 例如 release: prometheus
+	// +optional
 	Labels map[string]string `json:"labels,omitempty"`
 }
 
@@ -280,7 +280,7 @@ type VLLMServiceSpec struct {
 	// +kubebuilder:validation:Maximum=65535
 	Port int32 `json:"port,omitempty"`
 
-	//GatewayRef 表示当前VLLMService要挂载到哪个Gateway上。 不填写gatewayRef时，operator只创建Deployment和service，不创建HTTPRoute
+	// GatewayRef 表示当前VLLMService要挂载到哪个Gateway上。 不填写gatewayRef时，operator只创建Deployment和service，不创建HTTPRoute
 	// +optional
 	GatewayRef *VLLMServiceGatewayRef `json:"gatewayRef,omitempty"`
 
@@ -364,7 +364,7 @@ type VLLMServiceStatus struct {
 	GatewayRefNamespace string `json:"gatewayRefNamespace,omitempty"`
 
 	// HTTPRouteName 表示operator为当前VLLMService创建的HTTPRoute名称
-	// +optionoal
+	// +optional
 	HTTPRouteName string `json:"httpRouteName,omitempty"`
 
 	// +optional
