@@ -246,7 +246,7 @@ Operator 会更新 `status`：
 | `StorageReady` | `spec.storage.pvcName` 对应 PVC 已 Bound。 |
 | `RouteReady` | 未启用 Gateway 路由，或 HTTPRoute 已被 Gateway 接受且引用解析成功。 |
 | `MonitoringReady` | 未启用 monitoring，或 ServiceMonitor 已配置成功。 |
-| `Available` | Deployment、Storage、Route、Monitoring 都处于就绪状态。 |
+| `Available` | Deployment、Storage、Route 都处于就绪状态。 |
 
 排查时优先看：
 
