@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM golang:1.24 AS builder
+FROM registry.cn-hangzhou.aliyuncs.com/docker-test-dai/ganyi:golang_1.24 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -29,7 +29,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o ma
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot
+FROM registry.cn-hangzhou.aliyuncs.com/docker-test-dai/ganyi:gcr_io_distroless_static.nonroot
 WORKDIR /
 # 配置 Go 国内代理，避免 docker build 阶段访问 proxy.golang.org 超时
 
