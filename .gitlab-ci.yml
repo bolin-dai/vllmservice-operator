@@ -1,6 +1,7 @@
 stages:
   - check
   - build
+  - image
 
 default:
   image: golang:1.24
@@ -28,3 +29,23 @@ build-manager:
     paths:
       - bin/manager
     expire_in: 7 days
+
+docker-build-push:
+  stage: image
+  image: docker:27
+  services:
+    - name: docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_HOST: "tcp://docker:2375"
+    IMAGE_NAME: "$ALIYUN_REGISTRY/$ALIYUN_NAMESPACE/$ALIYUN_REPOSITORY"
+    IMAGE_TAG: "$CI_COMMIT_SHORT_SHA"
+  before_script:
+    - docker version
+    - echo "$ALIYUN_PASSWORD" | docker login "$ALIYUN_REGISTRY" -u "$ALIYUN_USERNAME" --password-stdin
+  script:
+    - docker build -t "$IMAGE_NAME:$IMAGE_TAG" -t "$IMAGE_NAME:latest" .
+    - docker push "$IMAGE_NAME:$IMAGE_TAG"
+    - docker push "$IMAGE_NAME:latest"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
