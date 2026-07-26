@@ -11,16 +11,13 @@ default:
 variables:
   GOPROXY: "https://goproxy.cn,direct"
   GOSUMDB: "sum.golang.google.cn"
-  GOMODCACHE: "$CI_PROJECT_DIR/.cache/go/pkg/mod"
-  GOCACHE: "$CI_PROJECT_DIR/.cache/go-build"
+  GOCACHE: "/tmp/go-build"
 
 cache:
   key:
     files:
       - go.sum
   paths:
-    - .cache/go/pkg/mod/
-    - .cache/go-build/
     - bin/
 
 before_script:
