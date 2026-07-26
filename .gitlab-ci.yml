@@ -3,22 +3,15 @@ stages:
   - build
 
 default:
-  image: golang:1.24
+  image:
+    name: golang:1.24
+    pull_policy: if-not-present
   interruptible: true
 
 variables:
-  GOPROXY: "off"
-  GOSUMDB: "off"
-  GOMODCACHE: "$CI_PROJECT_DIR/.cache/go/pkg/mod"
-  GOCACHE: "$CI_PROJECT_DIR/.cache/go-build"
-
-cache:
-  key:
-    files:
-      - go.sum
-  paths:
-    - .cache/go/pkg/mod/
-    - .cache/go-build/
+  GOPROXY: "https://goproxy.cn,direct"
+  GOSUMDB: "sum.golang.google.cn"
+  GOCACHE: "/tmp/go-build"
 
 before_script:
   - go version
