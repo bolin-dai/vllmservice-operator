@@ -1,0 +1,57 @@
+stages:
+  - verify
+  - test
+  - lint
+  - build
+
+default:
+  image: golang:1.24
+  interruptible: true
+
+variables:
+  GOPROXY: "https://goproxy.cn,direct"
+  GOSUMDB: "sum.golang.google.cn"
+  GOMODCACHE: "$CI_PROJECT_DIR/.cache/go/pkg/mod"
+  GOCACHE: "$CI_PROJECT_DIR/.cache/go-build"
+
+cache:
+  key:
+    files:
+      - go.sum
+  paths:
+    - .cache/go/pkg/mod/
+    - .cache/go-build/
+    - bin/
+
+before_script:
+  - go version
+
+verify-generated:
+  stage: verify
+  script:
+    - make generate manifests fmt
+    - git diff --exit-code
+
+unit-test:
+  stage: test
+  script:
+    - make test
+  artifacts:
+    when: always
+    paths:
+      - cover.out
+    expire_in: 7 days
+
+lint:
+  stage: lint
+  script:
+    - make lint
+
+build-manager:
+  stage: build
+  script:
+    - make build
+  artifacts:
+    paths:
+      - bin/manager
+    expire_in: 7 days
