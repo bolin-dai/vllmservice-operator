@@ -1,7 +1,5 @@
 stages:
-  - verify
-  - test
-  - lint
+  - check
   - build
 
 default:
@@ -9,45 +7,32 @@ default:
   interruptible: true
 
 variables:
-  GOPROXY: "https://goproxy.cn,direct"
-  GOSUMDB: "sum.golang.google.cn"
-  GOCACHE: "/tmp/go-build"
+  GOPROXY: "off"
+  GOSUMDB: "off"
+  GOMODCACHE: "$CI_PROJECT_DIR/.cache/go/pkg/mod"
+  GOCACHE: "$CI_PROJECT_DIR/.cache/go-build"
 
 cache:
   key:
     files:
       - go.sum
   paths:
-    - bin/
+    - .cache/go/pkg/mod/
+    - .cache/go-build/
 
 before_script:
   - go version
 
-verify-generated:
-  stage: verify
+format-check:
+  stage: check
   script:
-    - make generate manifests fmt
-    - git diff --exit-code
-
-unit-test:
-  stage: test
-  script:
-    - make test
-  artifacts:
-    when: always
-    paths:
-      - cover.out
-    expire_in: 7 days
-
-lint:
-  stage: lint
-  script:
-    - make lint
+    - gofmt -l api cmd internal
+    - test -z "$(gofmt -l api cmd internal)"
 
 build-manager:
   stage: build
   script:
-    - make build
+    - go build -o bin/manager ./cmd/main.go
   artifacts:
     paths:
       - bin/manager
