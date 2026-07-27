@@ -5,7 +5,7 @@ stages:
   - deploy-config
 
 default:
-  image: golang:1.24
+  image: registry.cn-hangzhou.aliyuncs.com/docker-test-dai/ganyi:golang_1.24
   interruptible: true
 
 variables:
@@ -25,7 +25,7 @@ format-check:
 build-manager:
   stage: build
   script:
-    - go build -o bin/manager ./cmd/main.go
+    - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/manager ./cmd/main.go
   artifacts:
     paths:
       - bin/manager
@@ -33,20 +33,19 @@ build-manager:
 
 docker-build-push:
   stage: image
-  image: docker:27
-  services:
-    - name: docker:27-dind
+  image: registry.cn-hangzhou.aliyuncs.com/docker-test-dai/docker:27
+  needs:
+    - job: build-manager
+      artifacts: true
   variables:
-    DOCKER_TLS_CERTDIR: ""
-    DOCKER_HOST: "tcp://docker:2375"
+    IMAGE_NAME: "$ALIYUN_REGISTRY/$ALIYUN_NAMESPACE/$ALIYUN_REPOSITORY"
+    IMAGE_TAG: "$CI_COMMIT_SHORT_SHA"
   before_script:
     - docker version
     - echo "$ALIYUN_PASSWORD" | docker login "$ALIYUN_REGISTRY" -u "$ALIYUN_USERNAME" --password-stdin
   script:
-    - export IMAGE_NAME="${ALIYUN_REGISTRY}/${ALIYUN_NAMESPACE}/${ALIYUN_REPOSITORY}"
-    - export IMAGE_TAG="${CI_COMMIT_SHORT_SHA}"
     - echo "Build image ${IMAGE_NAME}:${IMAGE_TAG}"
-    - docker build -t "${IMAGE_NAME}:${IMAGE_TAG}" -t "${IMAGE_NAME}:latest" .
+    - docker build -f Dockerfile.ci -t "${IMAGE_NAME}:${IMAGE_TAG}" -t "${IMAGE_NAME}:latest" .
     - docker push "${IMAGE_NAME}:${IMAGE_TAG}"
     - docker push "${IMAGE_NAME}:latest"
   rules:
@@ -54,7 +53,7 @@ docker-build-push:
 
 update-kustomize-tag:
   stage: deploy-config
-  image: golang:1.24
+  image: registry.cn-hangzhou.aliyuncs.com/docker-test-dai/ganyi:golang_1.24
   needs:
     - docker-build-push
   before_script: []
