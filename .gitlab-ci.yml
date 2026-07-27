@@ -2,6 +2,7 @@ stages:
   - check
   - build
   - image
+  - deploy-config
 
 default:
   image: golang:1.24
@@ -47,5 +48,21 @@ docker-build-push:
     - docker build -t "$IMAGE_NAME:$IMAGE_TAG" -t "$IMAGE_NAME:latest" .
     - docker push "$IMAGE_NAME:$IMAGE_TAG"
     - docker push "$IMAGE_NAME:latest"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+update-kustomize-tag:
+  stage: deploy-config
+  image: golang:1.24
+  needs:
+    - docker-build-push
+  before_script: []
+  script:
+    - git config user.name "gitlab-ci"
+    - git config user.email "gitlab-ci@$CI_SERVER_HOST"
+    - sed -i -E "s#newTag: .*#newTag: ${CI_COMMIT_SHORT_SHA}#" config/manager/kustomization.yaml
+    - git add config/manager/kustomization.yaml
+    - git commit -m "deploy: update image tag ${CI_COMMIT_SHORT_SHA} [skip ci]" || echo "No manifest change"
+    - git push "http://${GITLAB_PUSH_USER}:${GITLAB_PUSH_TOKEN}@${CI_SERVER_HOST}:${CI_SERVER_PORT}/${CI_PROJECT_PATH}.git" HEAD:main
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
