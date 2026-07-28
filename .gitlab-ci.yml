@@ -2,29 +2,58 @@ stages:
   - check
   - build
   - image
+  - deploy-config
 
 default:
-  image: golang:1.24
+  image: registry.cn-hangzhou.aliyuncs.com/docker-test-dai/ganyi:golang_1.24
   interruptible: true
+  before_script:
+    - go version
 
 variables:
   GOPROXY: "https://goproxy.cn"
   GOSUMDB: "off"
-  GOCACHE: "/tmp/go-build"
 
-before_script:
-  - go version
+  # Go 模块下载缓存
+  GOMODCACHE: "$CI_PROJECT_DIR/.cache/go/pkg/mod"
+
+  # Go 编译缓存
+  GOCACHE: "$CI_PROJECT_DIR/.cache/go-build"
 
 format-check:
   stage: check
   script:
+    # 输出没有经过 gofmt 格式化的文件
     - gofmt -l api cmd internal
+
+    # 如果存在没有格式化的文件，则让 Job 失败
     - test -z "$(gofmt -l api cmd internal)"
 
 build-manager:
   stage: build
+
+  # 根据 go.sum 内容生成缓存键
+  cache:
+    key:
+      prefix: "go-1.24-linux-amd64"
+      files:
+        - go.sum
+    paths:
+      - .cache/go/pkg/mod/
+      - .cache/go-build/
+    policy: pull-push
+
   script:
-    - go build -o bin/manager ./cmd/main.go
+    # 防止仓库中不存在 bin 目录
+    - mkdir -p bin
+
+    # 构建能够放进 scratch 镜像的静态 Linux 二进制文件
+    - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/manager ./cmd/main.go
+
+    # 检查编译结果
+    - ls -lah bin/manager
+    - file bin/manager || true
+
   artifacts:
     paths:
       - bin/manager
@@ -32,20 +61,91 @@ build-manager:
 
 docker-build-push:
   stage: image
-  image: docker:27
-  services:
-    - name: docker:27-dind
+
+  image: registry.cn-hangzhou.aliyuncs.com/docker-test-dai/docker:27
+
+  # 镜像推送过程中不允许被新 Pipeline 自动取消
+  interruptible: false
+
+  needs:
+    - job: build-manager
+      artifacts: true
+
   variables:
-    DOCKER_TLS_CERTDIR: ""
-    DOCKER_HOST: "tcp://docker:2375"
     IMAGE_NAME: "$ALIYUN_REGISTRY/$ALIYUN_NAMESPACE/$ALIYUN_REPOSITORY"
     IMAGE_TAG: "$CI_COMMIT_SHORT_SHA"
+
+  # 覆盖 default 中的 before_script，不再执行 go version
   before_script:
     - docker version
     - echo "$ALIYUN_PASSWORD" | docker login "$ALIYUN_REGISTRY" -u "$ALIYUN_USERNAME" --password-stdin
+
   script:
-    - docker build -t "$IMAGE_NAME:$IMAGE_TAG" -t "$IMAGE_NAME:latest" .
-    - docker push "$IMAGE_NAME:$IMAGE_TAG"
-    - docker push "$IMAGE_NAME:latest"
+    - echo "Build image ${IMAGE_NAME}:${IMAGE_TAG}"
+
+    # 检查上一个 Job 下载下来的 artifacts
+    - ls -lah
+    - ls -lah bin
+    - test -f bin/manager
+
+    # 准备最小镜像构建目录
+    - mkdir -p .ci-image-context
+    - cp bin/manager .ci-image-context/manager
+    - chmod +x .ci-image-context/manager
+
+    # 生成用于构建最终镜像的 Dockerfile
+    - printf '%s\n' 'FROM scratch' 'WORKDIR /' 'COPY manager /manager' 'USER 65532:65532' 'ENTRYPOINT ["/manager"]' > .ci-image-context/Dockerfile
+
+    # 检查镜像构建内容
+    - cat .ci-image-context/Dockerfile
+    - ls -lah .ci-image-context
+
+    # 同时构建提交版本标签和 latest 标签
+    - docker build -f .ci-image-context/Dockerfile -t "${IMAGE_NAME}:${IMAGE_TAG}" -t "${IMAGE_NAME}:latest" .ci-image-context
+
+    # 推送不可变的 commit SHA 标签
+    - docker push "${IMAGE_NAME}:${IMAGE_TAG}"
+
+    # 更新 latest 标签
+    - docker push "${IMAGE_NAME}:latest"
+
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+update-kustomize-tag:
+  stage: deploy-config
+
+  image: registry.cn-hangzhou.aliyuncs.com/docker-test-dai/ganyi:golang_1.24
+
+  # Git commit 和 push 过程中不允许被新 Pipeline 自动取消
+  interruptible: false
+
+  needs:
+    - job: docker-build-push
+
+  # 清空 default 中的 before_script
+  before_script: []
+
+  script:
+    - git --version
+
+    # 配置 CI 提交身份
+    - git config user.name "gitlab-ci"
+    - git config user.email "gitlab-ci@$CI_SERVER_HOST"
+
+    # 修改 Kustomize 中的镜像标签
+    - echo "Update kustomize image tag to ${CI_COMMIT_SHORT_SHA}"
+    - grep -n "newTag" config/manager/kustomization.yaml
+    - 'sed -i -E "s#newTag: .*#newTag: \"${CI_COMMIT_SHORT_SHA}\"#" config/manager/kustomization.yaml'
+    - grep -n "newTag" config/manager/kustomization.yaml
+
+    # 查看并提交修改
+    - git diff
+    - git add config/manager/kustomization.yaml
+    - 'git commit -m "deploy: update image tag ${CI_COMMIT_SHORT_SHA} [skip ci]" || echo "No manifest change"'
+
+    # 将修改推送回 main 分支
+    - git push "http://${GITLAB_PUSH_USER}:${GITLAB_PUSH_TOKEN}@${CI_SERVER_HOST}:${CI_SERVER_PORT}/${CI_PROJECT_PATH}.git" HEAD:main
+
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
