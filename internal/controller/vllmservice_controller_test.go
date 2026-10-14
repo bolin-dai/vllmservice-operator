@@ -63,6 +63,7 @@ var _ = Describe("VLLMService Controller", func() {
 					Image:     "docker.m.daocloud.io/vllm/vllm-openai:latest",
 					ModelPath: "/data/models/Qwen2.5-1.5B-Instruct",
 					ModelName: "qwen2.5-1.5b-instruct",
+					Port:      8000,
 					Resources: corev1.ResourceRequirements{},
 					Storage: aiinfrav1alpha1.VLLMServiceStorageSpec{
 						PVCName:   "test-pvc",

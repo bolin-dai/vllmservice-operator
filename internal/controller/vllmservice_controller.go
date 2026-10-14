@@ -122,7 +122,7 @@ func (r *VLLMServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			{
 				Name:       "http",
 				Protocol:   corev1.ProtocolTCP,
-				Port:       portFor(vllmService),
+				Port:       vllmService.Spec.Port,
 				TargetPort: intstr.FromString("http"),
 			},
 		}
@@ -247,7 +247,7 @@ func (r *VLLMServiceReconciler) reconcileHTTPRoute(
 		}
 
 		hostname := gatewayv1.Hostname(vllmService.Spec.GatewayRef.Host)
-		backendPort := gatewayv1.PortNumber(portFor(vllmService))
+		backendPort := gatewayv1.PortNumber(vllmService.Spec.Port)
 
 		httpRoute.Spec = gatewayv1.HTTPRouteSpec{
 			CommonRouteSpec: gatewayv1.CommonRouteSpec{
@@ -661,7 +661,7 @@ func buildPodTemplate(vllmService *aiinfrav1alpha1.VLLMService) corev1.PodTempla
 }
 
 func buildVLLMContainer(vllmService *aiinfrav1alpha1.VLLMService) corev1.Container {
-	port := portFor(vllmService)
+	port := vllmService.Spec.Port
 
 	container := corev1.Container{
 		Name:            "vllm",
@@ -1620,14 +1620,6 @@ func replicasFor(vllmService *aiinfrav1alpha1.VLLMService) *int32 {
 		replicas = *vllmService.Spec.Replicas
 	}
 	return &replicas
-}
-
-func portFor(vllmService *aiinfrav1alpha1.VLLMService) int32 {
-	if vllmService.Spec.Port == 0 {
-		return 8000
-	}
-
-	return vllmService.Spec.Port
 }
 
 func selectorLabelsForVLLMService(name string) map[string]string {
