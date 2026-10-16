@@ -340,9 +340,6 @@ type VLLMServiceStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// +optional
-	Phase string `json:"phase,omitempty"`
-
-	// +optional
 	ReadyReplicas int32 `json:"readyReplicas,omitempty"`
 
 	// +optional

@@ -227,7 +227,6 @@ Operator 会更新 `status`：
 | 字段 | 说明 |
 | --- | --- |
 | `observedGeneration` | 当前 status 对应的 `metadata.generation`。 |
-| `phase` | 基于 Deployment 推导，可能是 `Pending`、`Running`、`failed`。 |
 | `readyReplicas` | Deployment ready 副本数。 |
 | `deploymentName` | Operator 创建或同步的 Deployment 名称。 |
 | `serviceName` | Operator 创建或同步的 Service 名称。 |
@@ -235,7 +234,7 @@ Operator 会更新 `status`：
 | `serviceMonitorName` | Operator 创建或同步的 ServiceMonitor 名称。 |
 | `gatewayRefName` | 当前引用的 Gateway 名称。 |
 | `gatewayRefNamespace` | 当前引用的 Gateway 命名空间。 |
-| `message` | 当前阶段或异常的简要说明。 |
+| `message` | 以 `Available` Condition 的摘要为基础，附加未就绪或状态未知组件的详细信息。 |
 | `conditions` | 各组件就绪状态。 |
 
 当前 Conditions：
@@ -246,7 +245,7 @@ Operator 会更新 `status`：
 | `StorageReady` | `spec.storage.pvcName` 对应 PVC 已 Bound。 |
 | `RouteReady` | 未启用 Gateway 路由，或 HTTPRoute 已被 Gateway 接受且引用解析成功。 |
 | `MonitoringReady` | 未启用 monitoring，或 ServiceMonitor 已配置成功。 |
-| `Available` | Deployment、Storage、Route 都处于就绪状态。 |
+| `Available` | Deployment、Storage、Route 和 Monitoring 都处于就绪状态。 |
 
 排查时优先看：
 

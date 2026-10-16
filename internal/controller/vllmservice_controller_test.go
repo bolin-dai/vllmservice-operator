@@ -149,6 +149,8 @@ var _ = Describe("VLLMService Controller", func() {
 			Expect(availableCondition).NotTo(BeNil())
 			Expect(availableCondition.Status).To(Equal(metav1.ConditionFalse))
 			Expect(availableCondition.Reason).To(Equal("ComponentsNotReady"))
+			Expect(updatedVLLMService.Status.Message).To(HavePrefix(availableCondition.Message))
+			Expect(updatedVLLMService.Status.Message).To(ContainSubstring(storageCondition.Message))
 		})
 	})
 })

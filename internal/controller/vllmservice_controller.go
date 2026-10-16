@@ -1463,16 +1463,6 @@ func (r *VLLMServiceReconciler) updateVLLMServiceStatus(
 ) error {
 	before := vllmService.DeepCopy()
 
-	phase, message := phaseAndMessageFromDeployment(deployment)
-
-	if routeMessage != "" {
-		if message != "" {
-			message = message + "; " + routeMessage
-		} else {
-			message = routeMessage
-		}
-	}
-
 	serviceName := ""
 	if service != nil {
 		serviceName = service.Name
@@ -1526,8 +1516,19 @@ func (r *VLLMServiceReconciler) updateVLLMServiceStatus(
 		monitoringCondition,
 	)
 
+	messageParts := []string{overallAvailableCondition.Message}
+	for _, condition := range []metav1.Condition{
+		deploymentCondition,
+		storageCondition,
+		routeCondition,
+		monitoringCondition,
+	} {
+		if condition.Status != metav1.ConditionTrue && condition.Message != "" {
+			messageParts = append(messageParts, fmt.Sprintf("%s: %s", condition.Type, condition.Message))
+		}
+	}
+
 	vllmService.Status.ObservedGeneration = vllmService.Generation
-	vllmService.Status.Phase = phase
 	vllmService.Status.ReadyReplicas = deployment.Status.ReadyReplicas
 	vllmService.Status.DeploymentName = deployment.Name
 	vllmService.Status.ServiceName = serviceName
@@ -1535,7 +1536,7 @@ func (r *VLLMServiceReconciler) updateVLLMServiceStatus(
 	vllmService.Status.GatewayRefName = gatewayRefName
 	vllmService.Status.GatewayRefNamespace = gatewayRefNamespace
 	vllmService.Status.HTTPRouteName = httpRouteName
-	vllmService.Status.Message = message
+	vllmService.Status.Message = strings.Join(messageParts, "; ")
 
 	apimeta.SetStatusCondition(
 		&vllmService.Status.Conditions,
@@ -1578,40 +1579,6 @@ func (r *VLLMServiceReconciler) updateVLLMServiceStatus(
 	}
 
 	return storageErr
-}
-
-func phaseAndMessageFromDeployment(deployment *appsv1.Deployment) (string, string) {
-	desiredReplicas := int32(1)
-	if deployment.Spec.Replicas != nil {
-		desiredReplicas = *deployment.Spec.Replicas
-	}
-
-	for _, condition := range deployment.Status.Conditions {
-		if condition.Type == appsv1.DeploymentReplicaFailure &&
-			condition.Status == corev1.ConditionTrue {
-			return "failed", fmt.Sprintf(
-				"Deployment %s 副本创建失败：%s",
-				deployment.Name,
-				condition.Message,
-			)
-		}
-	}
-
-	if desiredReplicas > 0 && deployment.Status.ReadyReplicas >= desiredReplicas {
-		return "Running", fmt.Sprintf(
-			"Deployment %s 已就绪：readyReplicas=%d/%d",
-			deployment.Name,
-			deployment.Status.ReadyReplicas,
-			desiredReplicas,
-		)
-	}
-
-	return "Pending", fmt.Sprintf(
-		"Deployment %s 正在启动：readyReplicas=%d/%d",
-		deployment.Name,
-		deployment.Status.ReadyReplicas,
-		desiredReplicas,
-	)
 }
 
 func replicasFor(vllmService *aiinfrav1alpha1.VLLMService) *int32 {

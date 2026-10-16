@@ -452,8 +452,6 @@ spec:
                 description: ObservedGeneration 表示当前status是根据哪一版 VLLMService spec计算出来的
                 format: int64
                 type: integer
-              phase:
-                type: string
               readyReplicas:
                 format: int32
                 type: integer
