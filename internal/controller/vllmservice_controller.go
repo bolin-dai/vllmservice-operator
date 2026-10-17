@@ -1057,16 +1057,6 @@ func (r *VLLMServiceReconciler) storageReadyCondition(
 ) (metav1.Condition, error) {
 	pvcName := vllmService.Spec.Storage.PVCName
 
-	if pvcName == "" {
-		return newVLLMServiceCondition(
-			vllmService,
-			aiinfrav1alpha1.VLLMServiceConditionStorageReady,
-			metav1.ConditionFalse,
-			"PVCNameMissing",
-			"spec.storage.pvcName 不能为空",
-		), nil
-	}
-
 	pvc := &corev1.PersistentVolumeClaim{}
 
 	err := r.Get(ctx, client.ObjectKey{
