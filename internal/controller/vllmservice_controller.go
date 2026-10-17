@@ -1137,34 +1137,45 @@ func (r *VLLMServiceReconciler) storageReadyCondition(
 	}
 }
 
+// findHTTPRouteParentStatus 根据 gatewayRef 的名称、命名空间和监听器名称，
+// 从 HTTPRoute.status.parents 中查找第一条匹配的父级状态记录。
+// 本函数只定位记录，具体是否就绪由 routeReadyCondition 检查其中的 Conditions。
 func findHTTPRouteParentStatus(
 	vllmService *aiinfrav1alpha1.VLLMService,
 	httpRoute *gatewayv1.HTTPRoute,
 ) *gatewayv1.RouteParentStatus {
+	// 未配置 Gateway 引用时，没有需要查找的父级状态。
 	if vllmService.Spec.GatewayRef == nil {
 		return nil
 	}
 
 	expectedGatewayName := vllmService.Spec.GatewayRef.Name
+	// gatewayRef 未填写 namespace 时，使用 VLLMService 所在的命名空间。
 	expectedGatewayNamespace := gatewayRefNamespaceFor(vllmService)
 	expectedSectionName := vllmService.Spec.GatewayRef.SectionName
 
+	// 一个 HTTPRoute 可以有多条父级状态，需要逐条筛选目标 Gateway 的记录。
 	for i := range httpRoute.Status.Parents {
+		// 取得列表元素的指针，匹配成功后直接返回这条状态记录。
 		parentStatus := &httpRoute.Status.Parents[i]
 
+		// 名称不匹配时，跳过当前记录，继续检查下一条。
 		if string(parentStatus.ParentRef.Name) != expectedGatewayName {
 			continue
 		}
 
+		// ParentRef 未填写 namespace 时，按 Gateway API 规则使用 HTTPRoute 的命名空间。
 		parentNamespace := httpRoute.Namespace
 		if parentStatus.ParentRef.Namespace != nil {
 			parentNamespace = string(*parentStatus.ParentRef.Namespace)
 		}
 
+		// 不同命名空间可以存在同名 Gateway，因此还要匹配命名空间。
 		if parentNamespace != expectedGatewayNamespace {
 			continue
 		}
 
+		// 配置了 sectionName 时，状态记录必须指向同名监听器；未配置时不按监听器筛选。
 		if expectedSectionName != "" {
 			if parentStatus.ParentRef.SectionName == nil {
 				continue
@@ -1175,17 +1186,23 @@ func findHTTPRouteParentStatus(
 			}
 		}
 
+		// 所有匹配条件均满足，返回该 Gateway/监听器对应的状态记录。
 		return parentStatus
 	}
 
+	// 尚未出现匹配记录，由调用方据此生成状态尚未确定的 Condition。
 	return nil
 }
 
+// routeReadyCondition 将目标 Gateway 对 HTTPRoute 的状态转换为 VLLMService 的 RouteReady。
+// 配置路由时，要求目标父级记录中的 Accepted 和 ResolvedRefs 均为 True，且状态未过期。
+// 本函数只检查传入的对象和消息，不发起 Kubernetes API 请求，也不探测实际 HTTP 连通性。
 func routeReadyCondition(
 	vllmService *aiinfrav1alpha1.VLLMService,
 	httpRoute *gatewayv1.HTTPRoute,
 	routeMessage string,
 ) metav1.Condition {
+	// 路由是可选组件：未配置 gatewayRef 时视为满足要求，避免阻止整体 Available。
 	if !gatewayRefEnabled(vllmService) {
 		return newVLLMServiceCondition(
 			vllmService,
@@ -1196,6 +1213,8 @@ func routeReadyCondition(
 		)
 	}
 
+	// 前面的 Gateway 引用检查已发现问题，例如 Gateway 不存在、监听器不存在或协议不符。
+	// 保留具体说明，将已知的配置问题标记为 False。
 	if routeMessage != "" {
 		return newVLLMServiceCondition(
 			vllmService,
@@ -1206,6 +1225,7 @@ func routeReadyCondition(
 		)
 	}
 
+	// 尚未拿到 HTTPRoute 时，缺少判断依据，先返回 Unknown 等待后续状态。
 	if httpRoute == nil {
 		return newVLLMServiceCondition(
 			vllmService,
@@ -1216,6 +1236,7 @@ func routeReadyCondition(
 		)
 	}
 
+	// HTTPRoute 可关联多个父级，只检查当前 gatewayRef 对应的 Gateway/监听器状态。
 	parentStatus := findHTTPRouteParentStatus(vllmService, httpRoute)
 	if parentStatus == nil {
 		return newVLLMServiceCondition(
@@ -1227,11 +1248,14 @@ func routeReadyCondition(
 		)
 	}
 
+	// Accepted 表示目标 Gateway 的控制器是否接受此路由配置。
+	// FindStatusCondition 按 Type 查找 Condition，未找到时返回 nil。
 	accepted := apimeta.FindStatusCondition(
 		parentStatus.Conditions,
 		string(gatewayv1.RouteConditionAccepted),
 	)
 
+	// 父级记录已存在，但控制器尚未报告 Accepted，暂时无法确定是否接受。
 	if accepted == nil {
 		return newVLLMServiceCondition(
 			vllmService,
@@ -1242,6 +1266,8 @@ func routeReadyCondition(
 		)
 	}
 
+	// 先核对版本：旧配置对应的状态不能用于判断当前 HTTPRoute，需等待控制器更新。
+	// 此处比较的是 HTTPRoute 的 generation，而非 VLLMService 的 generation。
 	if accepted.ObservedGeneration < httpRoute.Generation {
 		return newVLLMServiceCondition(
 			vllmService,
@@ -1256,6 +1282,7 @@ func routeReadyCondition(
 		)
 	}
 
+	// False 和 Unknown 都未满足接受条件；保留原 Status，并在消息中保留原始原因。
 	if accepted.Status != metav1.ConditionTrue {
 		return newVLLMServiceCondition(
 			vllmService,
@@ -1270,11 +1297,14 @@ func routeReadyCondition(
 		)
 	}
 
+	// Accepted=True 后继续检查引用：ResolvedRefs 表示后端 Service 等引用是否存在且合法。
+	// 路由可以已被接受，但仍因后端不存在或跨命名空间引用未获允许而 ResolvedRefs=False。
 	resolvedRefs := apimeta.FindStatusCondition(
 		parentStatus.Conditions,
 		string(gatewayv1.RouteConditionResolvedRefs),
 	)
 
+	// 尚未报告引用解析结果时返回 Unknown，不能仅凭 Accepted=True 就判定就绪。
 	if resolvedRefs == nil {
 		return newVLLMServiceCondition(
 			vllmService,
@@ -1285,6 +1315,7 @@ func routeReadyCondition(
 		)
 	}
 
+	// 每条 Condition 独立更新，因此 ResolvedRefs 也需要单独检查是否对应最新配置。
 	if resolvedRefs.ObservedGeneration < httpRoute.Generation {
 		return newVLLMServiceCondition(
 			vllmService,
@@ -1299,6 +1330,7 @@ func routeReadyCondition(
 		)
 	}
 
+	// 引用检查未通过时，传递其 False/Unknown 状态，并保留具体错误信息。
 	if resolvedRefs.Status != metav1.ConditionTrue {
 		return newVLLMServiceCondition(
 			vllmService,
@@ -1313,6 +1345,7 @@ func routeReadyCondition(
 		)
 	}
 
+	// 两项检查均满足，按本项目规则将 RouteReady 标记为 True。
 	return newVLLMServiceCondition(
 		vllmService,
 		aiinfrav1alpha1.VLLMServiceConditionRouteReady,
