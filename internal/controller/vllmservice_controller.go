@@ -1088,8 +1088,11 @@ func (r *VLLMServiceReconciler) storageReadyCondition(
 		), err
 	}
 
+	// 将 PVC 的绑定状态转换为 StorageReady；这些分支返回 nil 表示状态检查成功，
+	// 存储是否就绪由 Condition 表达，不通过 error 表达。
 	switch pvc.Status.Phase {
 	case corev1.ClaimBound:
+		// PVC 已绑定到 PV，将存储标记为就绪。
 		return newVLLMServiceCondition(
 			vllmService,
 			aiinfrav1alpha1.VLLMServiceConditionStorageReady,
@@ -1104,6 +1107,7 @@ func (r *VLLMServiceReconciler) storageReadyCondition(
 		), nil
 
 	case corev1.ClaimLost:
+		// PVC 曾经绑定过 PV，但对应的 PV 已丢失，因此将存储标记为未就绪。
 		return newVLLMServiceCondition(
 			vllmService,
 			aiinfrav1alpha1.VLLMServiceConditionStorageReady,
@@ -1117,6 +1121,7 @@ func (r *VLLMServiceReconciler) storageReadyCondition(
 		), nil
 
 	default:
+		// Pending（等待绑定）以及空值等未匹配状态均进入此分支，统一标记为未就绪。
 		return newVLLMServiceCondition(
 			vllmService,
 			aiinfrav1alpha1.VLLMServiceConditionStorageReady,
