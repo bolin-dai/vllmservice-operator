@@ -89,6 +89,39 @@ func TestUpdateVLLMServiceStatus(t *testing.T) {
 			wantDetails: []string{"PVC default/models 已丢失其绑定的 PersistentVolume"},
 		},
 		{
+			name: "ready deployment with pending PVC",
+			configure: func(_ *aiinfrav1alpha1.VLLMService, _ *appsv1.Deployment, pvc *corev1.PersistentVolumeClaim) {
+				pvc.Status.Phase = corev1.ClaimPending
+			},
+			wantAvailable: metav1.ConditionFalse,
+			wantConditions: map[string]conditionExpectation{
+				aiinfrav1alpha1.VLLMServiceConditionStorageReady: {metav1.ConditionFalse, "PVCNotBound"},
+			},
+			wantDetails: []string{"PVC default/models 尚未绑定，当前状态为 Pending"},
+		},
+		{
+			name: "ready deployment with empty PVC phase",
+			configure: func(_ *aiinfrav1alpha1.VLLMService, _ *appsv1.Deployment, pvc *corev1.PersistentVolumeClaim) {
+				pvc.Status.Phase = ""
+			},
+			wantAvailable: metav1.ConditionUnknown,
+			wantConditions: map[string]conditionExpectation{
+				aiinfrav1alpha1.VLLMServiceConditionStorageReady: {metav1.ConditionUnknown, "PVCStatusUnknown"},
+			},
+			wantDetails: []string{"PVC default/models 状态尚未确定，当前状态为 \"\""},
+		},
+		{
+			name: "ready deployment with unrecognized PVC phase",
+			configure: func(_ *aiinfrav1alpha1.VLLMService, _ *appsv1.Deployment, pvc *corev1.PersistentVolumeClaim) {
+				pvc.Status.Phase = corev1.PersistentVolumeClaimPhase("Unrecognized")
+			},
+			wantAvailable: metav1.ConditionUnknown,
+			wantConditions: map[string]conditionExpectation{
+				aiinfrav1alpha1.VLLMServiceConditionStorageReady: {metav1.ConditionUnknown, "PVCStatusUnknown"},
+			},
+			wantDetails: []string{"PVC default/models 状态尚未确定，当前状态为 \"Unrecognized\""},
+		},
+		{
 			name: "ready replicas with stale deployment status",
 			configure: func(_ *aiinfrav1alpha1.VLLMService, deployment *appsv1.Deployment, _ *corev1.PersistentVolumeClaim) {
 				deployment.Status.ObservedGeneration = deployment.Generation - 1

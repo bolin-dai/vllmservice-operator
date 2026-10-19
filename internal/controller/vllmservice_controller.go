@@ -1120,8 +1120,8 @@ func (r *VLLMServiceReconciler) storageReadyCondition(
 			),
 		), nil
 
-	default:
-		// Pending（等待绑定）以及空值等未匹配状态均进入此分支，统一标记为未就绪。
+	case corev1.ClaimPending:
+		// PVC 尚未完成绑定，存储暂未就绪，等待后续绑定结果。
 		return newVLLMServiceCondition(
 			vllmService,
 			aiinfrav1alpha1.VLLMServiceConditionStorageReady,
@@ -1129,6 +1129,21 @@ func (r *VLLMServiceReconciler) storageReadyCondition(
 			"PVCNotBound",
 			fmt.Sprintf(
 				"PVC %s/%s 尚未绑定，当前状态为 %s",
+				pvc.Namespace,
+				pvc.Name,
+				pvc.Status.Phase,
+			),
+		), nil
+
+	default:
+		// 空值或未识别的 Phase 无法说明绑定结果，将存储状态标记为 Unknown。
+		return newVLLMServiceCondition(
+			vllmService,
+			aiinfrav1alpha1.VLLMServiceConditionStorageReady,
+			metav1.ConditionUnknown,
+			"PVCStatusUnknown",
+			fmt.Sprintf(
+				"PVC %s/%s 状态尚未确定，当前状态为 %q",
 				pvc.Namespace,
 				pvc.Name,
 				pvc.Status.Phase,
